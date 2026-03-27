@@ -1,0 +1,1 @@
+ALTER TABLE public.scheduling_services ADD COLUMN IF NOT EXISTS bookable boolean NOT NULL DEFAULT true;

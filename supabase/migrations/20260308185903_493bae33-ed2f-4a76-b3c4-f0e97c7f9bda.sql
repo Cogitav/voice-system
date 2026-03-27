@@ -1,0 +1,1 @@
+ALTER TABLE public.scheduling_services ADD COLUMN IF NOT EXISTS show_in_chat_menu boolean NOT NULL DEFAULT true;

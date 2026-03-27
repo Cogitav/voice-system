@@ -1,0 +1,49 @@
+project_id = "slfiptqsuwoxvbikzqww"
+
+[functions.admin-reset-password]
+verify_jwt = false
+
+[functions.agent-test]
+verify_jwt = false
+
+[functions.create-initial-admin]
+verify_jwt = false
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.send-follow-up-email]
+verify_jwt = false
+
+[functions.chat-ai-response]
+verify_jwt = false
+
+[functions.operator-assistant]
+verify_jwt = false
+
+[functions.public-chat]
+verify_jwt = false
+
+[functions.close-conversation]
+verify_jwt = false
+
+[functions.send-credit-alert-email]
+verify_jwt = false
+
+[functions.test-ai-provider]
+verify_jwt = false
+
+[functions.external-actions]
+verify_jwt = false
+
+[functions.manage-ai-provider]
+verify_jwt = false
+
+[functions.check-availability]
+verify_jwt = false
+
+[functions.core-health-check]
+verify_jwt = false
+
+[functions.booking-v2]
+verify_jwt = false

@@ -1,0 +1,1 @@
+ALTER TABLE public.agentes ADD COLUMN response_style text NOT NULL DEFAULT 'neutral';
