@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Copy, Check, ExternalLink, Code2, Globe } from 'lucide-react';
 import { toast } from 'sonner';
 
-const PUBLISHED_URL = 'https://ai-call-chorus12.lovable.app';
+const PUBLISHED_URL = 'https://voice-system-beta.vercel.app';
 
 export default function WidgetsPage() {
   const { data: empresas, isLoading } = useEmpresas();
