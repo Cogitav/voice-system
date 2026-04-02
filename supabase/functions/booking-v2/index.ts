@@ -1854,14 +1854,6 @@ Deno.serve(async (req) => {
       payload: result.payload,
     });
 
-  } catch (err) {
-    console.error('[BookingV2] Error:', err);
-    return new Response(JSON.stringify({ error: 'Internal error' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-});
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 // deno-lint-ignore no-explicit-any
