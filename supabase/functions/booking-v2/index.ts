@@ -1805,8 +1805,7 @@ Deno.serve(async (req) => {
     payload: { error: 'missing_lifecycle' },
   });
 }
-      }
-    }
+
 
     // ── Deterministic Response Variation Layer ──
     let finalResponse = result.response;
