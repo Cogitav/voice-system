@@ -54,7 +54,10 @@ serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
 
-    const { data: { user }, error: userError } = await supabaseUser.auth.getUser();
+    const {
+  data: { user },
+  error: userError,
+} = await supabaseAdmin.auth.getUser(authHeader.replace('Bearer ', ''));
     if (userError || !user) {
       return new Response(
         JSON.stringify({ error: 'Não autorizado' }),
