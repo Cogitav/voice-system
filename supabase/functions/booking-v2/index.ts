@@ -1795,17 +1795,17 @@ Deno.serve(async (req) => {
           result.payload = { error: commitResult.error_code || 'lifecycle_commit_failed' };
         }
       } else {
-  console.error('[BookingV2] ❌ Missing lifecycleId — booking blocked');
+        console.error('[BookingV2] ❌ Missing lifecycleId — booking blocked');
 
-  return jsonResponse({
-    response: 'Ocorreu um erro ao processar o agendamento. Vamos tentar novamente.',
-    context: result.context,
-    booking_created: false,
-    action: 'booking_error',
-    payload: { error: 'missing_lifecycle' },
-  });
-}
-
+        return jsonResponse({
+          response: 'Ocorreu um erro ao processar o agendamento. Vamos tentar novamente.',
+          context: result.context,
+          booking_created: false,
+          action: 'booking_error',
+          payload: { error: 'missing_lifecycle' },
+        });
+      }
+    }
 
     // ── Deterministic Response Variation Layer ──
     let finalResponse = result.response;
@@ -1852,7 +1852,17 @@ Deno.serve(async (req) => {
       action: result.action,
       payload: result.payload,
     });
+  } catch (err) {
+    console.error('[BookingV2] Unhandled error:', err);
+    return jsonResponse({
+      response: 'Ocorreu um erro inesperado. Por favor tente novamente.',
+      context: null,
+      booking_created: false,
+      action: 'booking_error',
+      payload: { error: 'unhandled_exception' },
+    });
   }
+});
 
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
