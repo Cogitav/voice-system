@@ -1853,6 +1853,7 @@ Deno.serve(async (req) => {
       action: result.action,
       payload: result.payload,
     });
+  });
 
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
