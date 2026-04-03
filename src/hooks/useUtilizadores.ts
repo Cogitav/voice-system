@@ -36,7 +36,6 @@ export function useUtilizadores(empresaFilter?: string, includeArchived = false)
   return useQuery({
     queryKey: ['utilizadores', empresaFilter, includeArchived],
     queryFn: async () => {
-      // Fetch profiles with empresa info
       let query = supabase
         .from('profiles')
         .select(`
@@ -52,53 +51,41 @@ export function useUtilizadores(empresaFilter?: string, includeArchived = false)
         `)
         .order('created_at', { ascending: false });
 
-      // Apply empresa filter if provided (admin filtering) or auto-filter for coordinators
       if (empresaFilter) {
         query = query.eq('empresa_id', empresaFilter);
       } else if (!isAdmin && profile?.empresa_id) {
         query = query.eq('empresa_id', profile.empresa_id);
       }
 
-      // Filter out soft-deleted unless explicitly requested
       if (!includeArchived) {
         query = query.is('deleted_at', null);
       }
 
-      const { data: profiles, error: profilesError } = await query;
+      const { data: profiles, error } = await query;
 
-      if (profilesError) {
-        throw new Error(profilesError.message);
-      }
+      if (error) throw new Error(error.message);
 
-      // Filter out users from deleted empresas (unless viewing archived)
-      const filteredProfiles = includeArchived 
-        ? profiles 
+      const filteredProfiles = includeArchived
+        ? profiles
         : (profiles || []).filter((p: any) => !p.empresas?.deleted_at);
 
-      // Fetch roles for the users we have access to
       const userIds = (filteredProfiles || []).map(p => p.user_id);
-      
-      if (userIds.length === 0) {
-        return [];
-      }
+
+      if (userIds.length === 0) return [];
 
       const { data: roles, error: rolesError } = await supabase
         .from('user_roles')
         .select('user_id, role')
         .in('user_id', userIds);
 
-      if (rolesError) {
-        throw new Error(rolesError.message);
-      }
+      if (rolesError) throw new Error(rolesError.message);
 
-      // Create a map of user_id to role
       const roleMap = new Map<string, AppRole>();
       roles?.forEach((r) => {
         roleMap.set(r.user_id, r.role as AppRole);
       });
 
-      // Combine data
-      const utilizadores: Utilizador[] = (filteredProfiles || []).map((p) => ({
+      return (filteredProfiles || []).map((p) => ({
         id: p.id,
         user_id: p.user_id,
         nome: p.nome,
@@ -109,8 +96,6 @@ export function useUtilizadores(empresaFilter?: string, includeArchived = false)
         status: p.status,
         created_at: p.created_at,
       }));
-
-      return utilizadores;
     },
   });
 }
@@ -120,10 +105,20 @@ export function useCreateUtilizador() {
 
   return useMutation({
     mutationFn: async (data: CreateUtilizadorData) => {
-      const { data: session } = await supabase.auth.getSession();
-      
-      if (!session.session) {
+
+      // 🔥 USER CHECK
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError || !userData.user) {
         throw new Error('Não autenticado');
+      }
+
+      // 🔥 TOKEN REAL
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      if (!token) {
+        throw new Error('Token inválido');
       }
 
       const response = await fetch(
@@ -132,7 +127,7 @@ export function useCreateUtilizador() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.session.access_token}`,
+            'Authorization': `Bearer ${token}`,
           },
           body: JSON.stringify(data),
         }
@@ -146,13 +141,16 @@ export function useCreateUtilizador() {
 
       return result;
     },
+
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['utilizadores'] });
+
       toast.success('Convite enviado com sucesso!', {
         description: 'O utilizador receberá um email para definir a sua password.',
         duration: 6000,
       });
     },
+
     onError: (error: Error) => {
       toast.error(`Erro ao criar utilizador: ${error.message}`);
     },
@@ -164,49 +162,42 @@ export function useUpdateUtilizador() {
 
   return useMutation({
     mutationFn: async ({ profileId, nome, role, status }: UpdateUtilizadorData) => {
-      // Update profile if nome or status changed
       if (nome !== undefined || status !== undefined) {
-        const updates: { nome?: string; status?: string } = {};
+        const updates: any = {};
         if (nome !== undefined) updates.nome = nome;
         if (status !== undefined) updates.status = status;
 
-        const { error: profileError } = await supabase
+        const { error } = await supabase
           .from('profiles')
           .update(updates)
           .eq('id', profileId);
 
-        if (profileError) {
-          throw new Error(profileError.message);
-        }
+        if (error) throw new Error(error.message);
       }
 
-      // Update role if changed (admin only, handled at RLS level)
       if (role !== undefined) {
-        // First get the user_id from profile
-        const { data: profile, error: fetchError } = await supabase
+        const { data: profile, error } = await supabase
           .from('profiles')
           .select('user_id')
           .eq('id', profileId)
           .single();
 
-        if (fetchError || !profile) {
-          throw new Error('Perfil não encontrado');
-        }
+        if (error || !profile) throw new Error('Perfil não encontrado');
 
         const { error: roleError } = await supabase
           .from('user_roles')
           .update({ role })
           .eq('user_id', profile.user_id);
 
-        if (roleError) {
-          throw new Error(roleError.message);
-        }
+        if (roleError) throw new Error(roleError.message);
       }
     },
+
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['utilizadores'] });
       toast.success('Utilizador atualizado com sucesso!');
     },
+
     onError: (error: Error) => {
       toast.error(`Erro ao atualizar utilizador: ${error.message}`);
     },
@@ -223,14 +214,14 @@ export function useUpdateUtilizadorStatus() {
         .update({ status })
         .eq('id', profileId);
 
-      if (error) {
-        throw new Error(error.message);
-      }
+      if (error) throw new Error(error.message);
     },
+
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['utilizadores'] });
       toast.success('Status atualizado com sucesso!');
     },
+
     onError: (error: Error) => {
       toast.error(`Erro ao atualizar status: ${error.message}`);
     },
@@ -242,15 +233,13 @@ export function useEmpresaUserCount(empresaId?: string) {
     queryKey: ['empresa-user-count', empresaId],
     queryFn: async () => {
       if (!empresaId) return 0;
-      
+
       const { count, error } = await supabase
         .from('profiles')
         .select('*', { count: 'exact', head: true })
         .eq('empresa_id', empresaId);
 
-      if (error) {
-        throw new Error(error.message);
-      }
+      if (error) throw new Error(error.message);
 
       return count || 0;
     },
