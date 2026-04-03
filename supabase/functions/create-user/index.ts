@@ -34,22 +34,30 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // 🔴 AUTH FIX
-    const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+    // 🔥 AUTH CORRETO (FINAL)
+    const authHeader = req.headers.get("Authorization");
 
-    if (!token) {
+    if (!authHeader) {
       return new Response(
         JSON.stringify({ error: 'Não autorizado (sem token)' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const supabaseUser = createClient(supabaseUrl, anonKey);
+    const supabaseUser = createClient(supabaseUrl, anonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+    });
 
     const {
       data: { user: authUser },
       error: userError,
-    } = await supabaseUser.auth.getUser(token);
+    } = await supabaseUser.auth.getUser();
+
+    console.log("AUTH USER:", authUser);
 
     if (userError || !authUser) {
       return new Response(
@@ -58,12 +66,12 @@ serve(async (req) => {
       );
     }
 
-    // 🔴 ADMIN CLIENT
+    // 🔥 ADMIN CLIENT
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 🔴 ROLE CHECK
+    // 🔥 ROLE CHECK
     const { data: callerRole } = await supabaseAdmin
       .from('user_roles')
       .select('role')
@@ -136,7 +144,7 @@ serve(async (req) => {
       targetEmpresaId = caller.empresaId;
     }
 
-    // 🔴 CREATE USER (INVITE FLOW)
+    // 🔥 INVITE USER
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.inviteUserByEmail(body.email, {
         data: { nome: body.nome },
@@ -151,7 +159,7 @@ serve(async (req) => {
 
     const userId = authData.user.id;
 
-    // 🔴 PROFILE
+    // 🔥 PROFILE
     const { data: existingProfile } = await supabaseAdmin
       .from('profiles')
       .select('user_id')
@@ -168,7 +176,7 @@ serve(async (req) => {
       });
     }
 
-    // 🔴 ROLE
+    // 🔥 ROLE
     const { data: existingRole } = await supabaseAdmin
       .from('user_roles')
       .select('user_id')
@@ -191,6 +199,8 @@ serve(async (req) => {
     );
 
   } catch (error: any) {
+    console.error(error);
+
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
