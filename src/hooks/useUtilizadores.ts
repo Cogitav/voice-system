@@ -127,7 +127,7 @@ export function useCreateUtilizador() {
       }
 
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-user`,
+        'https://szlwbqvqdvgjmnczfoaq.supabase.co/functions/v1/create-user',
         {
           method: 'POST',
           headers: {
