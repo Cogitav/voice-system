@@ -1103,7 +1103,7 @@ function processBookingV2(
     if (ctx._bv2_waiting_slot_selection && isInterruption(userMessage)) {
       log('[BookingV2] Non-booking interrupt during slot selection → bypassing suggestion mode');
       const resume = ctx._bv2_suggested_slots?.length
-        ? `\n\nQuando quiser, pode escolher um dos horários sugeridos 😊`
+        ? `\n\nQuando quiser, pode escolher um dos horários sugeridos 😉`
         : '';
       return { ...baseResult(), response: `Pode consultar essa informação no nosso site ou contactar-nos diretamente. 😊${resume}`, action: 'interruption', payload: { step: ctx.step } };
     }
