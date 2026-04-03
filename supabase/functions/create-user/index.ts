@@ -25,7 +25,7 @@ interface CallerInfo {
 
 serve(async (req) => {
 
-  console.log("METHOD:", req.method); // 👈 LOG PARA VALIDAR
+  console.log("METHOD:", req.method); // 👈 LOG PARA VALIDAR metodo
 
   // 🔴 PRE-FLIGHT (CORS)
   if (req.method === 'OPTIONS') {
