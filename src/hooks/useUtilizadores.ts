@@ -104,43 +104,44 @@ export function useCreateUtilizador() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: CreateUtilizadorData) => {
+  mutationFn: async (data: CreateUtilizadorData) => {
 
-      // 🔥 USER CHECK
-      const { data: userData, error: userError } = await supabase.auth.getUser();
+    const { data: sessionData, error } = await supabase.auth.getSession();
 
-      if (userError || !userData.user) {
-        throw new Error('Não autenticado');
+    if (error || !sessionData.session) {
+      throw new Error('Sessão inválida');
+    }
+
+    const token = sessionData.session.access_token;
+
+    console.log("TOKEN ENVIADO:", token);
+
+    if (!token) {
+      throw new Error('Token não encontrado');
+    }
+
+    const response = await fetch(
+      'https://szlwbqvqdvgjmnczfoaq.supabase.co/functions/v1/create-user',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
       }
+    );
 
-      // 🔥 TOKEN REAL
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
+    const result = await response.json();
 
-      if (!token) {
-        throw new Error('Token inválido');
-      }
+    console.log("RESULT:", result);
 
-      const response = await fetch(
-        'https://szlwbqvqdvgjmnczfoaq.supabase.co/functions/v1/create-user',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify(data),
-        }
-      );
+    if (!response.ok) {
+      throw new Error(result.error || 'Erro ao criar utilizador');
+    }
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Erro ao criar utilizador');
-      }
-
-      return result;
-    },
+    return result;
+  },
 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['utilizadores'] });
