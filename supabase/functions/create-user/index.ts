@@ -21,8 +21,6 @@ serve(async (req) => {
     // 🔥 AUTH HEADER
     const authHeader = req.headers.get("authorization");
 
-    console.log("AUTH HEADER:", authHeader);
-
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: 'Sem token' }),
@@ -30,7 +28,7 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 USER CLIENT
+    // 🔥 USER CLIENT (com token)
     const supabaseUser = createClient(supabaseUrl, anonKey, {
       global: {
         headers: {
@@ -53,32 +51,20 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 ADMIN CLIENT
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+    // 🔥 ROLE VIA METADATA
+    const userRole = user.user_metadata?.role;
 
-    // 🔥 ROLE DEBUG
-    const { data: roleData, error: roleError } = await supabaseAdmin
-      .from('public.user_roles')
-      .select('*')
-      .eq('user_id', user.id);
+    console.log("USER ROLE:", userRole);
 
-    console.log("USER ID:", user.id);
-    console.log("ROLE DATA:", roleData);
-    console.log("ROLE ERROR:", roleError);
-
-    if (!roleData || roleData.length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'Sem role associada' }),
-        { status: 403, headers: corsHeaders }
-      );
-    }
-
-    if (roleData[0].role !== 'admin') {
+    if (userRole !== 'admin') {
       return new Response(
         JSON.stringify({ error: 'Sem permissões' }),
         { status: 403, headers: corsHeaders }
       );
     }
+
+    // 🔥 ADMIN CLIENT
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
     const body = await req.json();
 
@@ -89,7 +75,7 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 CREATE USER
+    // 🔥 CREATE USER (invite flow)
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       body.email,
       {
@@ -107,6 +93,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
+        message: 'Convite enviado com sucesso',
         user_id: data.user.id,
       }),
       { status: 200, headers: corsHeaders }
