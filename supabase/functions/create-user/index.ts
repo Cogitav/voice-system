@@ -18,7 +18,7 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // 🔥 AUTH HEADER
+    // 🔥 AUTH
     const authHeader = req.headers.get("authorization");
 
     if (!authHeader) {
@@ -28,7 +28,6 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 USER CLIENT (com token)
     const supabaseUser = createClient(supabaseUrl, anonKey, {
       global: {
         headers: {
@@ -42,8 +41,6 @@ serve(async (req) => {
       error: userError,
     } = await supabaseUser.auth.getUser();
 
-    console.log("AUTH USER:", user);
-
     if (userError || !user) {
       return new Response(
         JSON.stringify({ error: 'Token inválido' }),
@@ -53,8 +50,6 @@ serve(async (req) => {
 
     // 🔥 ROLE VIA METADATA
     const userRole = user.user_metadata?.role;
-
-    console.log("USER ROLE:", userRole);
 
     if (userRole !== 'admin') {
       return new Response(
@@ -75,7 +70,7 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 CREATE USER (invite flow)
+    // 🔥 CREATE USER (com email)
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       body.email,
       {
@@ -90,11 +85,39 @@ serve(async (req) => {
       );
     }
 
+    const userId = data.user.id;
+
+    // 🔥 CRIAR PROFILE
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .insert({
+        user_id: userId,
+        nome: body.nome,
+        email: body.email,
+        status: 'ativo',
+      });
+
+    if (profileError) {
+      console.error("PROFILE ERROR:", profileError);
+    }
+
+    // 🔥 CRIAR ROLE
+    const { error: roleError } = await supabaseAdmin
+      .from('user_roles')
+      .insert({
+        user_id: userId,
+        role: 'cliente_normal',
+      });
+
+    if (roleError) {
+      console.error("ROLE ERROR:", roleError);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
-        message: 'Convite enviado com sucesso',
-        user_id: data.user.id,
+        message: 'Utilizador criado com sucesso',
+        user_id: userId,
       }),
       { status: 200, headers: corsHeaders }
     );
