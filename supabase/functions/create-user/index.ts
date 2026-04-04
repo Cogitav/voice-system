@@ -18,8 +18,30 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // 🔥 USER (SEM HEADER MANUAL)
-    const supabaseUser = createClient(supabaseUrl, anonKey);
+    // 🔥 LER TOKEN CORRETAMENTE
+    const authHeader = req.headers.get("authorization");
+
+    console.log("AUTH HEADER:", authHeader);
+
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Sem token' }),
+        { status: 401, headers: corsHeaders }
+      );
+    }
+
+    // 🔥 CLIENT COM TOKEN
+    const supabaseUser = createClient(
+      supabaseUrl,
+      anonKey,
+      {
+        global: {
+          headers: {
+            Authorization: authHeader,
+          },
+        },
+      }
+    );
 
     const {
       data: { user },
@@ -30,7 +52,7 @@ serve(async (req) => {
 
     if (userError || !user) {
       return new Response(
-        JSON.stringify({ error: 'Não autorizado' }),
+        JSON.stringify({ error: 'Token inválido' }),
         { status: 401, headers: corsHeaders }
       );
     }
@@ -44,6 +66,8 @@ serve(async (req) => {
       .select('role')
       .eq('user_id', user.id)
       .maybeSingle();
+
+    console.log("ROLE:", roleData);
 
     if (!roleData || roleData.role !== 'admin') {
       return new Response(
@@ -61,7 +85,7 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 CREATE USER (INVITE FLOW)
+    // 🔥 CREATE USER
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       body.email,
       {
@@ -85,6 +109,8 @@ serve(async (req) => {
     );
 
   } catch (err: any) {
+    console.error("ERROR:", err);
+
     return new Response(
       JSON.stringify({ error: err.message }),
       { status: 500, headers: corsHeaders }
