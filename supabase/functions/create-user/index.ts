@@ -18,7 +18,7 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // 🔥 LER TOKEN CORRETAMENTE
+    // 🔥 AUTH HEADER
     const authHeader = req.headers.get("authorization");
 
     console.log("AUTH HEADER:", authHeader);
@@ -30,18 +30,14 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 CLIENT COM TOKEN
-    const supabaseUser = createClient(
-      supabaseUrl,
-      anonKey,
-      {
-        global: {
-          headers: {
-            Authorization: authHeader,
-          },
+    // 🔥 USER CLIENT
+    const supabaseUser = createClient(supabaseUrl, anonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
         },
-      }
-    );
+      },
+    });
 
     const {
       data: { user },
@@ -60,16 +56,24 @@ serve(async (req) => {
     // 🔥 ADMIN CLIENT
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
-    // 🔥 ROLE CHECK
-    const { data: roleData } = await supabaseAdmin
+    // 🔥 ROLE DEBUG
+    const { data: roleData, error: roleError } = await supabaseAdmin
       .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .maybeSingle();
+      .select('*')
+      .eq('user_id', user.id);
 
-    console.log("ROLE:", roleData);
+    console.log("USER ID:", user.id);
+    console.log("ROLE DATA:", roleData);
+    console.log("ROLE ERROR:", roleError);
 
-    if (!roleData || roleData.role !== 'admin') {
+    if (!roleData || roleData.length === 0) {
+      return new Response(
+        JSON.stringify({ error: 'Sem role associada' }),
+        { status: 403, headers: corsHeaders }
+      );
+    }
+
+    if (roleData[0].role !== 'admin') {
       return new Response(
         JSON.stringify({ error: 'Sem permissões' }),
         { status: 403, headers: corsHeaders }
