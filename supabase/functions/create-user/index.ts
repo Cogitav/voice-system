@@ -58,7 +58,7 @@ serve(async (req) => {
 
     // 🔥 ROLE DEBUG
     const { data: roleData, error: roleError } = await supabaseAdmin
-      .from('user_roles')
+      .from('public.user_roles')
       .select('*')
       .eq('user_id', user.id);
 
