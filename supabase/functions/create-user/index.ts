@@ -57,13 +57,9 @@ serve(async (req) => {
     });
 
     // 🔥 VALIDAR ROLE (DB DIRETO)
-    const { data: roleData } = await supabaseAdmin
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    const ADMIN_EMAIL = "agentesvirtuais.ai@gmail.com";
 
-    if (!roleData || roleData.role !== 'admin') {
+if (user.email !== ADMIN_EMAIL) {
       return new Response(
         JSON.stringify({ error: 'Sem permissões' }),
         { status: 403, headers: corsHeaders }
