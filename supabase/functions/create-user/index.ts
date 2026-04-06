@@ -18,7 +18,7 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // 🔥 AUTH
+    // 🔥 AUTH HEADER
     const authHeader = req.headers.get("authorization");
 
     if (!authHeader) {
@@ -28,6 +28,7 @@ serve(async (req) => {
       );
     }
 
+    // 🔥 USER CLIENT (com token)
     const supabaseUser = createClient(supabaseUrl, anonKey, {
       global: {
         headers: {
@@ -48,18 +49,22 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 ROLE VIA METADATA
-    const userRole = user.user_metadata?.role;
+    // 🔥 ADMIN CLIENT
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
-    if (userRole !== 'admin') {
+    // 🔥 VALIDAR ROLE NA BD (CORRETO)
+    const { data: roleData, error: roleFetchError } = await supabaseAdmin
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (roleFetchError || !roleData || roleData.role !== 'admin') {
       return new Response(
         JSON.stringify({ error: 'Sem permissões' }),
         { status: 403, headers: corsHeaders }
       );
     }
-
-    // 🔥 ADMIN CLIENT
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
     const body = await req.json();
 
@@ -70,7 +75,7 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 CREATE USER (com email)
+    // 🔥 CREATE USER (INVITE)
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       body.email,
       {
@@ -98,7 +103,10 @@ serve(async (req) => {
       });
 
     if (profileError) {
-      console.error("PROFILE ERROR:", profileError);
+      return new Response(
+        JSON.stringify({ error: 'Erro profile: ' + profileError.message }),
+        { status: 500, headers: corsHeaders }
+      );
     }
 
     // 🔥 CRIAR ROLE
@@ -106,11 +114,14 @@ serve(async (req) => {
       .from('user_roles')
       .insert({
         user_id: userId,
-        role: 'cliente_normal',
+        role: body.role || 'cliente_normal',
       });
 
     if (roleError) {
-      console.error("ROLE ERROR:", roleError);
+      return new Response(
+        JSON.stringify({ error: 'Erro role: ' + roleError.message }),
+        { status: 500, headers: corsHeaders }
+      );
     }
 
     return new Response(
@@ -123,8 +134,6 @@ serve(async (req) => {
     );
 
   } catch (err: any) {
-    console.error("ERROR:", err);
-
     return new Response(
       JSON.stringify({ error: err.message }),
       { status: 500, headers: corsHeaders }
