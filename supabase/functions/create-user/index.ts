@@ -48,23 +48,23 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 ADMIN CLIENT (correto)
+    // 🔥 CHECK ADMIN (TEMPORÁRIO)
+    const ADMIN_EMAIL = "agentesvirtuais.ai@gmail.com";
+
+    if (user.email !== ADMIN_EMAIL) {
+      return new Response(
+        JSON.stringify({ error: 'Sem permissões' }),
+        { status: 403, headers: corsHeaders }
+      );
+    }
+
+    // 🔥 ADMIN CLIENT
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
       },
     });
-
-    // 🔥 VALIDAR ROLE (DB DIRETO)
-    const ADMIN_EMAIL = "agentesvirtuais.ai@gmail.com";
-
-if (user.email !== ADMIN_EMAIL) {
-      return new Response(
-        JSON.stringify({ error: 'Sem permissões' }),
-        { status: 403, headers: corsHeaders }
-      );
-    }
 
     const body = await req.json();
 
@@ -75,7 +75,7 @@ if (user.email !== ADMIN_EMAIL) {
       );
     }
 
-    // 🔥 CREATE USER
+    // 🔥 CREATE USER (INVITE)
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       body.email,
       {
@@ -92,29 +92,54 @@ if (user.email !== ADMIN_EMAIL) {
 
     const userId = data.user.id;
 
-    // 🔥 PROFILE
-    await supabaseAdmin.from('profiles').insert({
-      user_id: userId,
-      nome: body.nome,
-      email: body.email,
-      status: 'ativo',
-    });
+    // 🔥 CREATE PROFILE (COM ERRO VISÍVEL)
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .insert({
+        user_id: userId,
+        nome: body.nome,
+        email: body.email,
+        status: 'ativo',
+      });
 
-    // 🔥 ROLE
-    await supabaseAdmin.from('user_roles').insert({
-      user_id: userId,
-      role: body.role || 'cliente_normal',
-    });
+    if (profileError) {
+      console.error("PROFILE ERROR:", profileError);
+
+      return new Response(
+        JSON.stringify({ error: 'Erro profile: ' + profileError.message }),
+        { status: 500, headers: corsHeaders }
+      );
+    }
+
+    // 🔥 CREATE ROLE (COM ERRO VISÍVEL)
+    const { error: roleError } = await supabaseAdmin
+      .from('user_roles')
+      .insert({
+        user_id: userId,
+        role: body.role || 'cliente_normal',
+      });
+
+    if (roleError) {
+      console.error("ROLE ERROR:", roleError);
+
+      return new Response(
+        JSON.stringify({ error: 'Erro role: ' + roleError.message }),
+        { status: 500, headers: corsHeaders }
+      );
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
+        message: 'Utilizador criado com sucesso',
         user_id: userId,
       }),
       { status: 200, headers: corsHeaders }
     );
 
   } catch (err: any) {
+    console.error("ERROR:", err);
+
     return new Response(
       JSON.stringify({ error: err.message }),
       { status: 500, headers: corsHeaders }
