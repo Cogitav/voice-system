@@ -18,7 +18,7 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // 🔥 AUTH HEADER
+    // 🔥 AUTH
     const authHeader = req.headers.get("authorization");
 
     if (!authHeader) {
@@ -28,7 +28,6 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 USER CLIENT (com token)
     const supabaseUser = createClient(supabaseUrl, anonKey, {
       global: {
         headers: {
@@ -49,7 +48,7 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 ADMIN CLIENT (FORÇADO)
+    // 🔥 ADMIN CLIENT (correto)
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         autoRefreshToken: false,
@@ -57,12 +56,14 @@ serve(async (req) => {
       },
     });
 
-    // 🔥 VALIDAR ADMIN VIA FUNCTION (SEM RLS)
-    const { data: roleData, error: roleError } = await supabaseAdmin.rpc('get_user_role', {
-      user_id_input: user.id,
-    });
+    // 🔥 VALIDAR ROLE (DB DIRETO)
+    const { data: roleData } = await supabaseAdmin
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .maybeSingle();
 
-    if (roleError || !roleData || roleData !== 'admin') {
+    if (!roleData || roleData.role !== 'admin') {
       return new Response(
         JSON.stringify({ error: 'Sem permissões' }),
         { status: 403, headers: corsHeaders }
@@ -78,7 +79,7 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 CREATE USER (INVITE)
+    // 🔥 CREATE USER
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       body.email,
       {
@@ -95,42 +96,23 @@ serve(async (req) => {
 
     const userId = data.user.id;
 
-    // 🔥 CRIAR PROFILE
-    const { error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .insert({
-        user_id: userId,
-        nome: body.nome,
-        email: body.email,
-        status: 'ativo',
-      });
+    // 🔥 PROFILE
+    await supabaseAdmin.from('profiles').insert({
+      user_id: userId,
+      nome: body.nome,
+      email: body.email,
+      status: 'ativo',
+    });
 
-    if (profileError) {
-      return new Response(
-        JSON.stringify({ error: 'Erro profile: ' + profileError.message }),
-        { status: 500, headers: corsHeaders }
-      );
-    }
-
-    // 🔥 CRIAR ROLE
-    const { error: roleInsertError } = await supabaseAdmin
-      .from('user_roles')
-      .insert({
-        user_id: userId,
-        role: body.role || 'cliente_normal',
-      });
-
-    if (roleInsertError) {
-      return new Response(
-        JSON.stringify({ error: 'Erro role: ' + roleInsertError.message }),
-        { status: 500, headers: corsHeaders }
-      );
-    }
+    // 🔥 ROLE
+    await supabaseAdmin.from('user_roles').insert({
+      user_id: userId,
+      role: body.role || 'cliente_normal',
+    });
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: 'Utilizador criado com sucesso',
         user_id: userId,
       }),
       { status: 200, headers: corsHeaders }
