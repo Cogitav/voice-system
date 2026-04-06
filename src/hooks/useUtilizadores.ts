@@ -1,147 +1,56 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
-import { useAuth, AppRole } from '@/contexts/AuthContext';
-
-export interface Utilizador {
-  id: string;
-  user_id: string;
-  nome: string;
-  email: string;
-  empresa_id: string | null;
-  empresa_nome: string | null;
-  role: AppRole;
-  status: string;
-  created_at: string;
-}
-
-export interface CreateUtilizadorData {
-  nome: string;
-  email: string;
-  empresa_id: string;
-  role: 'cliente_coordenador' | 'cliente_normal';
-  status: string;
-}
-
-export interface UpdateUtilizadorData {
-  profileId: string;
-  nome?: string;
-  role?: 'cliente_coordenador' | 'cliente_normal';
-  status?: string;
-}
-
-export function useUtilizadores(empresaFilter?: string, includeArchived = false) {
-  const { isAdmin, profile } = useAuth();
-
-  return useQuery({
-    queryKey: ['utilizadores', empresaFilter, includeArchived],
-    queryFn: async () => {
-      let query = supabase
-        .from('profiles')
-        .select(`
-          id,
-          user_id,
-          nome,
-          email,
-          empresa_id,
-          status,
-          created_at,
-          deleted_at,
-          empresas (nome, deleted_at)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (empresaFilter) {
-        query = query.eq('empresa_id', empresaFilter);
-      } else if (!isAdmin && profile?.empresa_id) {
-        query = query.eq('empresa_id', profile.empresa_id);
-      }
-
-      if (!includeArchived) {
-        query = query.is('deleted_at', null);
-      }
-
-      const { data: profiles, error } = await query;
-
-      if (error) throw new Error(error.message);
-
-      const filteredProfiles = includeArchived
-        ? profiles
-        : (profiles || []).filter((p: any) => !p.empresas?.deleted_at);
-
-      const userIds = (filteredProfiles || []).map(p => p.user_id);
-
-      if (userIds.length === 0) return [];
-
-      const { data: roles, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('user_id, role')
-        .in('user_id', userIds);
-
-      if (rolesError) throw new Error(rolesError.message);
-
-      const roleMap = new Map<string, AppRole>();
-      roles?.forEach((r) => {
-        roleMap.set(r.user_id, r.role as AppRole);
-      });
-
-      return (filteredProfiles || []).map((p) => ({
-        id: p.id,
-        user_id: p.user_id,
-        nome: p.nome,
-        email: p.email,
-        empresa_id: p.empresa_id,
-        empresa_nome: p.empresas?.nome || null,
-        role: roleMap.get(p.user_id) || 'cliente_normal',
-        status: p.status,
-        created_at: p.created_at,
-      }));
-    },
-  });
-}
-
 export function useCreateUtilizador() {
   const queryClient = useQueryClient();
 
   return useMutation({
-  mutationFn: async (data: CreateUtilizadorData) => {
+    mutationFn: async (data: CreateUtilizadorData) => {
 
-    const { data: sessionData, error } = await supabase.auth.getSession();
-
-    if (error || !sessionData.session) {
-      throw new Error('Sessão inválida');
-    }
-
-    const token = sessionData.session.access_token;
-
-    console.log("TOKEN ENVIADO:", token);
-
-    if (!token) {
-      throw new Error('Token não encontrado');
-    }
-
-    const response = await fetch(
-      'https://szlwbqvqdvgjmnczfoaq.supabase.co/functions/v1/create-user',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(data),
+      // 🔥 VALIDAÇÃO CRÍTICA
+      if (!data.empresa_id) {
+        throw new Error('empresa_id em falta');
       }
-    );
 
-    const result = await response.json();
+      const { data: sessionData, error } = await supabase.auth.getSession();
 
-    console.log("RESULT:", result);
+      if (error || !sessionData.session) {
+        throw new Error('Sessão inválida');
+      }
 
-    if (!response.ok) {
-      throw new Error(result.error || 'Erro ao criar utilizador');
-    }
+      const token = sessionData.session.access_token;
 
-    return result;
-  },
+      if (!token) {
+        throw new Error('Token não encontrado');
+      }
+
+      console.log("PAYLOAD ENVIADO:", data);
+
+      const response = await fetch(
+        'https://szlwbqvqdvgjmnczfoaq.supabase.co/functions/v1/create-user',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            nome: data.nome,
+            email: data.email,
+            empresa_id: data.empresa_id, // 🔥 GARANTIDO
+            role: data.role,
+            status: data.status,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      console.log("RESULT:", result);
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Erro ao criar utilizador');
+      }
+
+      return result;
+    },
 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['utilizadores'] });
@@ -155,95 +64,5 @@ export function useCreateUtilizador() {
     onError: (error: Error) => {
       toast.error(`Erro ao criar utilizador: ${error.message}`);
     },
-  });
-}
-
-export function useUpdateUtilizador() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({ profileId, nome, role, status }: UpdateUtilizadorData) => {
-      if (nome !== undefined || status !== undefined) {
-        const updates: any = {};
-        if (nome !== undefined) updates.nome = nome;
-        if (status !== undefined) updates.status = status;
-
-        const { error } = await supabase
-          .from('profiles')
-          .update(updates)
-          .eq('id', profileId);
-
-        if (error) throw new Error(error.message);
-      }
-
-      if (role !== undefined) {
-        const { data: profile, error } = await supabase
-          .from('profiles')
-          .select('user_id')
-          .eq('id', profileId)
-          .single();
-
-        if (error || !profile) throw new Error('Perfil não encontrado');
-
-        const { error: roleError } = await supabase
-          .from('user_roles')
-          .update({ role })
-          .eq('user_id', profile.user_id);
-
-        if (roleError) throw new Error(roleError.message);
-      }
-    },
-
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['utilizadores'] });
-      toast.success('Utilizador atualizado com sucesso!');
-    },
-
-    onError: (error: Error) => {
-      toast.error(`Erro ao atualizar utilizador: ${error.message}`);
-    },
-  });
-}
-
-export function useUpdateUtilizadorStatus() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({ profileId, status }: { profileId: string; status: string }) => {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ status })
-        .eq('id', profileId);
-
-      if (error) throw new Error(error.message);
-    },
-
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['utilizadores'] });
-      toast.success('Status atualizado com sucesso!');
-    },
-
-    onError: (error: Error) => {
-      toast.error(`Erro ao atualizar status: ${error.message}`);
-    },
-  });
-}
-
-export function useEmpresaUserCount(empresaId?: string) {
-  return useQuery({
-    queryKey: ['empresa-user-count', empresaId],
-    queryFn: async () => {
-      if (!empresaId) return 0;
-
-      const { count, error } = await supabase
-        .from('profiles')
-        .select('*', { count: 'exact', head: true })
-        .eq('empresa_id', empresaId);
-
-      if (error) throw new Error(error.message);
-
-      return count || 0;
-    },
-    enabled: !!empresaId,
   });
 }

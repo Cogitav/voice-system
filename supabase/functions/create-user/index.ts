@@ -99,6 +99,7 @@ serve(async (req) => {
         user_id: userId,
         nome: body.nome,
         email: body.email,
+        empresa_id: body.empresa_id || null,
         status: 'ativo',
       });
 
