@@ -49,17 +49,20 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 ADMIN CLIENT
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+    // 🔥 ADMIN CLIENT (FORÇADO)
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
 
-    // 🔥 VALIDAR ROLE NA BD (CORRETO)
-    const { data: roleData, error: roleFetchError } = await supabaseAdmin
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    // 🔥 VALIDAR ADMIN VIA FUNCTION (SEM RLS)
+    const { data: roleData, error: roleError } = await supabaseAdmin.rpc('get_user_role', {
+      user_id_input: user.id,
+    });
 
-    if (roleFetchError || !roleData || roleData.role !== 'admin') {
+    if (roleError || !roleData || roleData !== 'admin') {
       return new Response(
         JSON.stringify({ error: 'Sem permissões' }),
         { status: 403, headers: corsHeaders }
@@ -110,16 +113,16 @@ serve(async (req) => {
     }
 
     // 🔥 CRIAR ROLE
-    const { error: roleError } = await supabaseAdmin
+    const { error: roleInsertError } = await supabaseAdmin
       .from('user_roles')
       .insert({
         user_id: userId,
         role: body.role || 'cliente_normal',
       });
 
-    if (roleError) {
+    if (roleInsertError) {
       return new Response(
-        JSON.stringify({ error: 'Erro role: ' + roleError.message }),
+        JSON.stringify({ error: 'Erro role: ' + roleInsertError.message }),
         { status: 500, headers: corsHeaders }
       );
     }
