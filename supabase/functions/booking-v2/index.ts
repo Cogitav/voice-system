@@ -1356,7 +1356,7 @@ const avail = await fetchAvailability(empresa_id, ctx.service_id, ctx.booking_da
 
 if (avail.available) {
 
-  // ✅ STEP 1 — availability_checked (OBRIGATÓRIO)
+  // STEP 1 — availability_checked
   if (lifecycleId) {
     await processBookingEvent(supabase, {
       lifecycle_id: lifecycleId,
@@ -1366,7 +1366,17 @@ if (avail.available) {
     });
   }
 
-  // ✅ STEP 2 — confirmation_requested
+  // 🔥 STEP 2 — slot_selected (FALTAVA ISTO)
+  if (lifecycleId) {
+    await processBookingEvent(supabase, {
+      lifecycle_id: lifecycleId,
+      event_type: 'slot_selected',
+      execution_id: `bv2_slot_${Date.now()}`,
+      payload: { selected_slot: ctx.booking_datetime },
+    });
+  }
+
+  // STEP 3 — confirmation_requested
   if (lifecycleId) {
     await processBookingEvent(supabase, {
       lifecycle_id: lifecycleId,
