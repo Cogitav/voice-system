@@ -1352,9 +1352,21 @@ Deno.serve(async (req) => {
       resetSuggestions(ctx);
 
       // Check availability before confirming
-      const avail = await fetchAvailability(empresa_id, ctx.service_id, ctx.booking_datetime);
-      if (avail.available) {
+const avail = await fetchAvailability(empresa_id, ctx.service_id, ctx.booking_datetime);
 
+if (avail.available) {
+
+  // ✅ STEP 1 — availability_checked (OBRIGATÓRIO)
+  if (lifecycleId) {
+    await processBookingEvent(supabase, {
+      lifecycle_id: lifecycleId,
+      event_type: 'availability_checked',
+      execution_id: `bv2_avail_${Date.now()}`,
+      payload: { requested_slot: ctx.booking_datetime },
+    });
+  }
+
+  // ✅ STEP 2 — confirmation_requested
   if (lifecycleId) {
     await processBookingEvent(supabase, {
       lifecycle_id: lifecycleId,
