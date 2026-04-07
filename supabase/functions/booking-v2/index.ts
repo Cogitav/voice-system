@@ -1354,14 +1354,26 @@ Deno.serve(async (req) => {
       // Check availability before confirming
       const avail = await fetchAvailability(empresa_id, ctx.service_id, ctx.booking_datetime);
       if (avail.available) {
-        ctx.step = 'confirm';
-        return jsonResponse({
-          response: `Perfeito, só para confirmar:\n\n📅 Data: ${formatDatetimePT(ctx.booking_datetime).split(' às ')[0]}\n⏰ Hora: ${formatTimePT(ctx.booking_datetime)}\n\nEstá tudo correto?`,
-          context: ctx,
-          booking_created: false,
-          action: 'ask_confirmation',
-          payload: { datetime: ctx.booking_datetime },
-        });
+
+  if (lifecycleId) {
+    await processBookingEvent(supabase, {
+      lifecycle_id: lifecycleId,
+      event_type: 'confirmation_requested',
+      execution_id: `bv2_confirm_${Date.now()}`,
+      payload: { requested_slot: ctx.booking_datetime },
+    });
+  }
+
+  ctx.step = 'confirm';
+
+  return jsonResponse({
+    response: `Perfeito, só para confirmar:\n\n📅 Data: ${formatDatetimePT(ctx.booking_datetime).split(' às ')[0]}\n⏰ Hora: ${formatTimePT(ctx.booking_datetime)}\n\nEstá tudo correto?`,
+    context: ctx,
+    booking_created: false,
+    action: 'ask_confirmation',
+    payload: { datetime: ctx.booking_datetime },
+  });
+}
       } else {
         // Store alternatives as structured suggestion slots
         if (avail.alternatives.length > 0) {
