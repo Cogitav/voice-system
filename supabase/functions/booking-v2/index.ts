@@ -112,76 +112,6 @@ function resetSuggestions(ctx: BookingV2Context): void {
   ctx._bv2_selected_slot = null;
 }
 
-// ─── Availability check (inline, no engine) ─────────────────────────────────
-async function checkAvailability(
-  supabase: SupabaseClient,
-  empresaId: string,
-  isoDatetime: string,
-  excludeAppointmentId?: string | null,
-): Promise<{ available: boolean; alternatives: string[] }> {
-  const datePart = isoDatetime.substring(0, 10);
-  const timePart = isoDatetime.includes('T') ? isoDatetime.substring(11, 16) : '00:00';
-
-  // Check for conflicts: same empresa, same start_datetime, not cancelled
-  let query = supabase
-    .from('agendamentos')
-    .select('id, hora, start_datetime')
-    .eq('empresa_id', empresaId)
-    .eq('data', datePart)
-    .eq('hora', timePart)
-    .in('estado', ['pendente', 'confirmado'])
-    .limit(1);
-
-  if (excludeAppointmentId) {
-    query = query.neq('id', excludeAppointmentId);
-  }
-
-  const { data: conflicts } = await query;
-
-  const hasConflict = conflicts && conflicts.length > 0;
-  console.log(`[Availability] date used: ${datePart} ${timePart} → ${hasConflict ? 'CONFLICT' : 'available'}${excludeAppointmentId ? ` (excluding ${excludeAppointmentId})` : ''}`);
-
-  if (!hasConflict) {
-    return { available: true, alternatives: [] };
-  }
-
-  // Find up to 3 alternative slots CLOSEST to requested time (hours 8-19, 30min increments)
-  const { data: dayBookings } = await supabase
-    .from('agendamentos')
-    .select('hora')
-    .eq('empresa_id', empresaId)
-    .eq('data', datePart)
-    .in('estado', ['pendente', 'confirmado']);
-
-  const takenTimes = new Set((dayBookings || []).map((b: { hora: string }) => b.hora.substring(0, 5)));
-
-  // Parse requested time to minutes for proximity sorting
-  const [reqH, reqM] = timePart.split(':').map(Number);
-  const targetMinutes = reqH * 60 + reqM;
-
-  // Generate all possible slots and compute distance
-  const candidates: { slot: string; distance: number }[] = [];
-  for (let h = 8; h <= 19; h++) {
-    for (const m of [0, 30]) {
-      const slot = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-      if (!takenTimes.has(slot) && slot !== timePart) {
-        const slotMinutes = h * 60 + m;
-        candidates.push({ slot, distance: Math.abs(slotMinutes - targetMinutes) });
-      }
-    }
-  }
-
-  // Sort by proximity and take top 3
-  candidates.sort((a, b) => {
-    if (a.distance !== b.distance) return a.distance - b.distance;
-    return a.slot.localeCompare(b.slot);
-  });
-  const alternatives = candidates.slice(0, 3).map(c => `${datePart}T${c.slot}:00`);
-
-  console.log(`[Suggestions] slots generated (closest to ${timePart}): ${alternatives.map(a => a.substring(11,16)).join(', ')}`);
-  return { available: false, alternatives };
-}
-
 // ─── Proactive Slot Suggestion Engine ────────────────────────────────────────
 async function fetchNextAvailableSlots(
   supabase: SupabaseClient,
@@ -1422,7 +1352,7 @@ Deno.serve(async (req) => {
       resetSuggestions(ctx);
 
       // Check availability before confirming
-      const avail = await checkAvailability(supabase, empresa_id, ctx.booking_datetime);
+      const avail = await fetchAvailability(empresa_id, ctx.service_id, ctx.booking_datetime);
       if (avail.available) {
         ctx.step = 'confirm';
         return jsonResponse({
@@ -1492,7 +1422,7 @@ Deno.serve(async (req) => {
     // ══════════════════════════════════════════════════════════════════════════
     if (result.needsAvailabilityCheck && result.context.step === 'reschedule_confirm' && result.context.reschedule_target) {
       const target = result.context.reschedule_target;
-      const avail = await checkAvailability(supabase, empresa_id, target, result.context.appointment_id);
+      const avail = await fetchAvailability(empresa_id, result.context.service_id, target);
       console.log(`[BookingV2] Reschedule availability: ${avail.available ? 'AVAILABLE' : 'CONFLICT'} for ${target}`);
 
       if (avail.available) {
@@ -1527,7 +1457,7 @@ Deno.serve(async (req) => {
       const datePart = target.substring(0, 10);
       const timePart = target.includes('T') ? target.substring(11, 16) : '00:00';
 
-      const finalCheck = await checkAvailability(supabase, empresa_id, target, result.context.appointment_id);
+      const finalCheck = await fetchAvailability(empresa_id, result.context.service_id, target);
       if (!finalCheck.available) {
         console.log('[BookingV2] Reschedule race condition — slot taken');
         result.context.step = 'reschedule';
@@ -1597,7 +1527,7 @@ Deno.serve(async (req) => {
           const datePart = target.substring(0, 10);
           const timePart = target.includes('T') ? target.substring(11, 16) : '00:00';
 
-          const finalCheck = await checkAvailability(supabase, empresa_id, target, result.context.appointment_id);
+          const finalCheck = await fetchAvailability(empresa_id, result.context.service_id, target);
           if (!finalCheck.available) {
             result.context.step = 'reschedule';
             result.context.reschedule_target = null;
@@ -1656,7 +1586,7 @@ Deno.serve(async (req) => {
 
     // ── Availability check — SINGLE gate for all booking creation ──
     if (result.needsAvailabilityCheck && result.context.booking_datetime) {
-      const avail = await checkAvailability(supabase, empresa_id, result.context.booking_datetime);
+      const avail = await fetchAvailability(empresa_id, result.context.service_id, result.context.booking_datetime);
       console.log(`[Validation] result: availability=${avail.available ? 'AVAILABLE' : 'CONFLICT'} | isConfirmationAttempt: ${result.isConfirmationAttempt} | booking_datetime: ${result.context.booking_datetime}`);
 
       if (avail.available) {
