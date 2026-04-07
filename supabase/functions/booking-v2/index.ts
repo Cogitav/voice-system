@@ -1666,41 +1666,41 @@ if (avail.available) {
       }
     }
 
-    // ── Create booking via Lifecycle Orchestrator (MANDATORY ENTRY POINT) ──
-    if (result.createBooking && result.context.booking_datetime) {
-      const dt = result.context.booking_datetime;
-      const execId = `bv2_confirm_${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
+    const dt = result.context.booking_datetime;
+const datePart = dt.substring(0, 10);
+const timePart = dt.substring(11, 16);
 
-      // Ensure lifecycle exists and is up-to-date
-      if (lifecycleId) {
-        // Update lifecycle with latest data before confirmation
-        const preEvents: Array<{ event: BookingEventType; payload: Record<string, unknown> }> = [];
+const { error, data } = await supabase
+  .from('agendamentos')
+  .insert({
+    empresa_id,
+    data: datePart,
+    hora: timePart,
+    start_datetime: dt,
+    customer_name: result.context.customer_name,
+    customer_email: result.context.customer_email,
+    customer_phone: result.context.customer_phone,
+    service_id: result.context.service_id,
+    estado: 'confirmado',
+  })
+  .select()
+  .single();
 
-        // Ensure service is tracked
-        if (result.context.service_id) {
-          preEvents.push({
-            event: 'service_matched',
-            payload: { service_id: result.context.service_id },
-          });
-        }
+if (error) {
+  console.error('[BookingV2] Direct DB error:', error);
 
-        // Ensure slot is tracked
-        preEvents.push({
-          event: 'slot_selected',
-          payload: { selected_slot: dt },
-        });
+  return jsonResponse({
+    response: 'Ocorreu um erro ao criar o agendamento. Por favor tente novamente.',
+    context: result.context,
+    booking_created: false,
+    action: 'booking_error',
+    payload: { error: 'db_insert_failed' },
+  });
+}
 
-        // Ensure customer data is tracked
-        if (result.context.customer_name) {
-          preEvents.push({
-            event: 'customer_data_collected',
-            payload: {
-              customer_name: result.context.customer_name,
-              customer_email: result.context.customer_email,
-              customer_phone: result.context.customer_phone,
-            },
-          });
-        }
+console.log('[BookingV2] ✅ Booking created directly:', data.id);
+
+result.context.appointment_id = data.id;
 
         // Ensure confirmation requested
         preEvents.push({
