@@ -76,6 +76,58 @@ Rules:
   },
 };
 
+interface LLMProviderConfig {
+  endpoint: string;
+  headers: Record<string, string>;
+}
+
+function resolveLLMProviderConfig(): LLMProviderConfig | null {
+  const provider = Deno.env.get('LLM_PROVIDER')?.toLowerCase();
+
+  if (provider === 'openai') {
+    const apiKey = Deno.env.get('OPENAI_API_KEY');
+    if (!apiKey) {
+      console.error('[LLM] OPENAI_API_KEY is not set');
+      return null;
+    }
+    return {
+      endpoint: 'https://api.openai.com/v1/chat/completions',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    };
+  }
+
+  if (provider === 'gemini') {
+    const apiKey = Deno.env.get('GOOGLE_API_KEY');
+    if (!apiKey) {
+      console.error('[LLM] GOOGLE_API_KEY is not set');
+      return null;
+    }
+    return {
+      endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    };
+  }
+
+  const fallbackKey = Deno.env.get('LOVABLE_API_KEY');
+  if (fallbackKey) {
+    return {
+      endpoint: 'https://ai.gateway.lovable.dev/v1/chat/completions',
+      headers: {
+        Authorization: `Bearer ${fallbackKey}`,
+        'Content-Type': 'application/json',
+      },
+    };
+  }
+
+  console.error('[LLM] LLM_PROVIDER is not configured and no LOVABLE_API_KEY fallback is available');
+  return null;
+}
+
 /**
  * Call the LLM to extract structured fields from a user message.
  * Uses tool calling with temperature 0 for deterministic output.
@@ -86,8 +138,6 @@ Rules:
 export async function extractStructuredFieldsViaLLM(
   message: string,
   existingContext: Context,
-  aiEndpoint: string,
-  aiAuthHeader: string,
   aiModel: string,
   companyServices?: CompanyServiceSummary[],
 ): Promise<Partial<Context>> {
@@ -144,13 +194,16 @@ Already collected context: ${JSON.stringify(
     )
   )}`;
 
+  const providerConfig = resolveLLMProviderConfig();
+  if (!providerConfig) {
+    console.error('[StructuredExtractor] No LLM provider configured');
+    return {};
+  }
+
   try {
-    let response = await fetch(aiEndpoint, {
+    let response = await fetch(providerConfig.endpoint, {
       method: 'POST',
-      headers: {
-        'Authorization': aiAuthHeader,
-        'Content-Type': 'application/json',
-      },
+      headers: providerConfig.headers,
       body: JSON.stringify({
         model: aiModel,
         temperature: 0,

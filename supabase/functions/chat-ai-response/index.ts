@@ -589,24 +589,19 @@ async function runServiceResolutionPipeline(
   console.log(`[ServicePipeline] Tier 1 failed (bestScore=${bestScore}) — trying semantic`);
 
   // === TIER 2: Semantic LLM fallback ===
-  const lovableKey = Deno.env.get('LOVABLE_API_KEY');
-  if (lovableKey) {
-    try {
-      const semanticId = await resolveServiceSemantically(
-        reasonOriginal,
-        services as ServiceCandidate[],
-        'https://ai.gateway.lovable.dev/v1/chat/completions',
-        `Bearer ${lovableKey}`,
-        'google/gemini-2.5-flash',
-      );
-      if (semanticId) {
-        const matchedSvc = services.find((s: { id: string }) => s.id === semanticId);
-        console.log(`[ServicePipeline] Tier 2 (semantic): ${matchedSvc?.name || semanticId}`);
-        return { service_id: semanticId, reason_normalized: matchedSvc?.name || '' };
-      }
-    } catch (semErr) {
-      console.warn('[ServicePipeline] Semantic resolver error:', semErr);
+  try {
+    const semanticId = await resolveServiceSemantically(
+      reasonOriginal,
+      services as ServiceCandidate[],
+      'google/gemini-2.5-flash',
+    );
+    if (semanticId) {
+      const matchedSvc = services.find((s: { id: string }) => s.id === semanticId);
+      console.log(`[ServicePipeline] Tier 2 (semantic): ${matchedSvc?.name || semanticId}`);
+      return { service_id: semanticId, reason_normalized: matchedSvc?.name || '' };
     }
+  } catch (semErr) {
+    console.warn('[ServicePipeline] Semantic resolver error:', semErr);
   }
 
   console.log('[ServicePipeline] All tiers failed — no service resolved');
@@ -4002,8 +3997,6 @@ Deno.serve(async (req) => {
     // Resolve AI credentials early for the structured extractor
     const empresa = conversation.empresas;
     const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    const extractorEndpoint = 'https://ai.gateway.lovable.dev/v1/chat/completions';
-    const extractorAuthHeader = `Bearer ${lovableApiKey}`;
     const extractorModel = 'google/gemini-2.5-flash';
 
     if ((currentState === 'collecting_data' || currentState === 'idle') && !hasActiveBooking) {
@@ -4024,7 +4017,7 @@ Deno.serve(async (req) => {
       }
 
       const llmFields = await extractStructuredFieldsViaLLM(
-        message, currentContext, extractorEndpoint, extractorAuthHeader, extractorModel, companyServices
+        message, currentContext, extractorModel, companyServices
       );
       const safeLlmFields = stripImmutableFields(llmFields);
 
@@ -5152,54 +5145,47 @@ Deno.serve(async (req) => {
     // === DYNAMIC AI PROVIDER RESOLUTION ===
     // empresa and lovableApiKey already declared above for structured extractor
     const aiRealEnabled = empresa?.chat_ai_real_enabled ?? false;
-    const companyProviderKey = empresa?.chat_ai_provider || null;
     const companyModel = empresa?.chat_ai_model || null;
+    const llmProvider = Deno.env.get('LLM_PROVIDER')?.toLowerCase();
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+    const googleApiKey = Deno.env.get('GOOGLE_API_KEY');
 
-    let resolvedModel = 'google/gemini-2.5-flash';
+    let resolvedModel = companyModel || 'google/gemini-2.5-flash';
     let resolvedEndpoint = 'https://ai.gateway.lovable.dev/v1/chat/completions';
     let resolvedAuthHeader = '';
+    let usedEnvProvider = false;
 
-    if (aiRealEnabled && companyProviderKey && companyModel) {
-      const { data: providerRow } = await supabase
-        .from('ai_providers')
-        .select('id, provider_key, is_enabled, api_key, status')
-        .eq('provider_key', companyProviderKey)
-        .maybeSingle();
-
-      if (providerRow && providerRow.is_enabled && providerRow.api_key) {
-        resolvedModel = companyModel;
-
-        console.log(`[AI-ROUTING] companyProviderKey: ${companyProviderKey}`);
-        console.log(`[AI-ROUTING] resolvedModel (before): ${resolvedModel}`);
-
-        if (providerRow.provider_key === 'openai') {
-          resolvedEndpoint = 'https://api.openai.com/v1/chat/completions';
-          resolvedAuthHeader = `Bearer ${providerRow.api_key}`;
-          if (resolvedModel.startsWith('openai/')) {
-            resolvedModel = resolvedModel.replace('openai/', '');
-          }
-        } else if (providerRow.provider_key === 'google') {
-          const geminiModel = resolvedModel.startsWith('google/') ? resolvedModel.replace('google/', '') : resolvedModel;
-          resolvedEndpoint = `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`;
-          resolvedAuthHeader = `Bearer ${providerRow.api_key}`;
-          resolvedModel = geminiModel;
-        } else {
-          console.warn(`[AI-ROUTING] Unknown provider_key: ${providerRow.provider_key}, falling back to Lovable AI`);
-          resolvedAuthHeader = `Bearer ${lovableApiKey}`;
+    if (aiRealEnabled && companyModel) {
+      if (llmProvider === 'openai' && openaiApiKey) {
+        resolvedEndpoint = 'https://api.openai.com/v1/chat/completions';
+        resolvedAuthHeader = `Bearer ${openaiApiKey}`;
+        usedEnvProvider = true;
+        if (resolvedModel.startsWith('openai/')) {
+          resolvedModel = resolvedModel.replace('openai/', '');
         }
-
-        console.log(`[AI-ROUTING] resolvedModel (final): ${resolvedModel}`);
-        console.log(`[AI] Provider selected: ${providerRow.provider_key} - ${resolvedModel}`);
+      } else if (llmProvider === 'gemini' && googleApiKey) {
+        resolvedEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`;
+        resolvedAuthHeader = '';
+        usedEnvProvider = true;
+        if (resolvedModel.startsWith('google/')) {
+          resolvedModel = resolvedModel.replace('google/', '');
+        }
       } else {
-        console.warn(`[AI] Provider '${companyProviderKey}' not ready, falling back to Lovable AI`);
-        resolvedAuthHeader = `Bearer ${lovableApiKey}`;
+        console.warn('[AI-ROUTING] No valid env LLM_PROVIDER configured or required API key missing; falling back to Lovable AI');
       }
-    } else {
-      resolvedAuthHeader = `Bearer ${lovableApiKey}`;
-      console.log(`[AI] Provider selected: lovable_default - ${resolvedModel}`);
     }
 
-    if (!resolvedAuthHeader || resolvedAuthHeader === 'Bearer ' || resolvedAuthHeader === 'Bearer null' || resolvedAuthHeader === 'Bearer undefined') {
+    if (!usedEnvProvider) {
+      resolvedEndpoint = 'https://ai.gateway.lovable.dev/v1/chat/completions';
+      resolvedAuthHeader = `Bearer ${lovableApiKey}`;
+      resolvedModel = 'google/gemini-2.5-flash';
+      console.log(`[AI] Provider selected: lovable_default - ${resolvedModel}`);
+    } else {
+      console.log(`[AI] Provider selected: ${llmProvider} - ${resolvedModel}`);
+    }
+
+    const isGeminiEndpoint = resolvedEndpoint.includes('generativelanguage.googleapis.com');
+    if (!isGeminiEndpoint && (!resolvedAuthHeader || resolvedAuthHeader === 'Bearer ' || resolvedAuthHeader === 'Bearer null' || resolvedAuthHeader === 'Bearer undefined')) {
       console.error('No valid AI API key available');
       return new Response(
         JSON.stringify({ error: 'AI service not configured' }),
@@ -5229,12 +5215,16 @@ Deno.serve(async (req) => {
         requestBody.tools = tools;
       }
 
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (resolvedAuthHeader) {
+        requestHeaders.Authorization = resolvedAuthHeader;
+      }
+
       let aiResponse = await fetch(resolvedEndpoint, {
         method: 'POST',
-        headers: {
-          'Authorization': resolvedAuthHeader,
-          'Content-Type': 'application/json',
-        },
+        headers: requestHeaders,
         body: JSON.stringify(requestBody),
       });
 
@@ -5247,10 +5237,7 @@ Deno.serve(async (req) => {
         
         aiResponse = await fetch(resolvedEndpoint, {
           method: 'POST',
-          headers: {
-            'Authorization': resolvedAuthHeader,
-            'Content-Type': 'application/json',
-          },
+          headers: requestHeaders,
           body: JSON.stringify(requestBody),
         });
         
@@ -5269,11 +5256,11 @@ Deno.serve(async (req) => {
         console.log('[AI-Fallback] Switching to secondary model: google/gemini-2.5-flash-lite');
 
         const fallbackBody = { ...requestBody, model: 'google/gemini-2.5-flash-lite' };
-        return new Response(JSON.stringify({
-  reply: "ok"
-}), {
-  headers: { "Content-Type": "application/json" }
-});
+        aiResponse = await fetch(resolvedEndpoint, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: JSON.stringify(fallbackBody),
+        });
 
         if (!aiResponse.ok) {
           const fallbackError = await aiResponse.text();
