@@ -1636,16 +1636,16 @@ Deno.serve(async (req) => {
       const { error, data } = await supabase
         .from('agendamentos')
         .insert({
-          empresa_id,
-          data: datePart,
-          hora: timePart,
-          start_datetime: dt,
-          customer_name: result.context.customer_name,
-          customer_email: result.context.customer_email,
-          customer_phone: result.context.customer_phone,
-          service_id: result.context.service_id,
-          estado: 'confirmado',
-        })
+  empresa_id,
+  data: datePart,
+  hora: timePart,
+  start_datetime: dt,
+  cliente_nome: result.context.customer_name,
+  cliente_telefone: result.context.customer_phone ?? null,
+  notas: result.context.customer_email ?? null,
+  service_id: result.context.service_id,
+  estado: 'confirmado',
+})
         .select()
         .single();
 
