@@ -604,107 +604,110 @@ const VARIATABLE_ACTIONS = new Set([
   'repeat_suggestions',
 ]);
 
+// ─── LLM Provider Abstraction ───────────────────────────────────────────────
+async function callLLM(prompt: string): Promise<string | null> {
+  const provider = Deno.env.get('LLM_PROVIDER');
+
+  try {
+    if (provider === 'openai') {
+      const apiKey = Deno.env.get('OPENAI_API_KEY');
+
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content ?? null;
+    }
+
+    if (provider === 'gemini') {
+      const apiKey = Deno.env.get('GOOGLE_API_KEY');
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              { role: 'user', parts: [{ text: prompt }] }
+            ],
+          }),
+        }
+      );
+
+      const data = await res.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+    }
+
+    console.log('[LLM] No provider configured');
+    return null;
+
+  } catch (err) {
+    console.error('[LLM] Error:', err);
+    return null;
+  }
+}
+
+
 // ─── LLM Response Refinement Layer ──────────────────────────────────────────
-// deno-lint-ignore no-explicit-any
 async function refineLLMResponse(
   originalResponse: string,
   action: string,
   payload: Record<string, any>,
 ): Promise<string> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  if (!LOVABLE_API_KEY) {
-    console.log('[LLMRefine] No API key, skipping refinement');
-    return originalResponse;
-  }
 
   const systemPrompt = `You are a Portuguese (Portugal) language polisher for a professional booking assistant.
-Your task: Rewrite the given message to sound more natural, warm and human.
+Rewrite the message to be more natural, warm and human.
 
 STRICT RULES:
-- DO NOT change any factual data (dates, times, names, prices)
-- DO NOT change intent or meaning
-- DO NOT add new information
-- DO NOT remove required information (dates, times, emojis like ✅, 📅, ⏰, 😊)
-- KEEP all specific values exactly as they appear (e.g. "Terça-feira, 25 de março às 14h")
-- Keep the message concise (max 2-3 sentences for simple actions)
-- Write in European Portuguese (PT-PT)
-- If unsure, return the original message unchanged
-- Return ONLY the final rewritten message, no explanations
-
-Action context: ${action}`;
+- DO NOT change facts (dates, times, names)
+- DO NOT add/remove info
+- KEEP emojis (✅ 📅 ⏰ 😊)
+- Keep concise (max 2 sentences)
+- PT-PT
+- Return ONLY final message`;
 
   try {
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-lite',
-        temperature: 0.3,
-        max_tokens: 300,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: originalResponse },
-        ],
-      }),
-    });
+    const prompt = `${systemPrompt}\n\nMessage:\n${originalResponse}`;
 
-    if (!response.ok) {
-      console.warn(`[LLMRefine] API error ${response.status}, using original`);
-      return originalResponse;
-    }
-
-    const data = await response.json();
-    const refined = data.choices?.[0]?.message?.content?.trim();
+    const refined = await callLLM(prompt);
 
     if (!refined || refined.length === 0) {
-      console.log('[LLMRefine] Empty response, using original');
+      console.log('[LLMRefine] Empty → fallback');
       return originalResponse;
     }
 
     if (refined.length > originalResponse.length * 2) {
-      console.warn('[LLMRefine] Response too long (>2x), using original');
+      console.log('[LLMRefine] Too long → fallback');
       return originalResponse;
     }
 
     const keyPatterns = extractKeyVariables(originalResponse, payload);
     const missing = keyPatterns.filter(v => !refined.includes(v));
+
     if (missing.length > 0) {
-      console.warn(`[LLMRefine] Missing key variables: ${missing.join(', ')} — using original`);
+      console.log('[LLMRefine] Missing variables → fallback');
       return originalResponse;
     }
 
-    console.log(`[LLMRefine] ✓ Refined (${action}): "${refined.substring(0, 60)}..."`);
+    console.log(`[LLMRefine] ✓ Refined (${action})`);
     return refined;
+
   } catch (err) {
     console.error('[LLMRefine] Error:', err);
     return originalResponse;
   }
 }
 
-// deno-lint-ignore no-explicit-any
-function extractKeyVariables(response: string, payload: Record<string, any>): string[] {
-  const vars: string[] = [];
-  const emojis = response.match(/[✅📅⏰😊🧾]/g);
-  if (emojis) vars.push(...new Set(emojis));
-  if (payload?.datetime) {
-    const dt = payload.datetime as string;
-    const fullFormatted = formatDatetimePT(dt);
-    vars.push(fullFormatted);
-    if (dt.includes('T')) {
-      const timePart = dt.substring(11, 16);
-      const [hh, mm] = timePart.split(':');
-      const timeFormatted = `${parseInt(hh)}h${mm !== '00' ? mm : ''}`;
-      vars.push(timeFormatted);
-    }
-  }
-  if (payload?.customer_name) {
-    vars.push(payload.customer_name);
-  }
-  return vars;
-}
 
 // ─── Name / Email / Phone extraction ─────────────────────────────────────────
 function extractIdentity(message: string, ctx: BookingV2Context): Partial<BookingV2Context> {
