@@ -22,13 +22,6 @@
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { toLisbonParts } from '../_shared/timezone-utils.ts';
-import {
-  processBookingEvent,
-  createBookingLifecycle,
-  getActiveLifecycle,
-  type BookingEventType,
-  type BookingLifecycle,
-} from '../_shared/booking-lifecycle-orchestrator.ts';
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
 const corsHeaders = {
@@ -796,6 +789,7 @@ type BookingV2Action =
   | 'reschedule_error'
   | 'reschedule_not_found'
   | 'race_condition'
+  | 'race_condition_db'
   | 'booking_error'
   | 'contact_received'
   | 'suggest_slots'
@@ -1309,24 +1303,6 @@ Deno.serve(async (req) => {
 
     const supabase = getSupabase();
 
-    // ── Lifecycle: Create or get active lifecycle for this conversation ──
-    let lifecycleId: string | null = null;
-    const existingLifecycle = await getActiveLifecycle(supabase, conversation_id);
-    if (existingLifecycle) {
-      lifecycleId = existingLifecycle.id;
-      console.log(`[BookingV2] Active lifecycle found: ${lifecycleId} (state=${existingLifecycle.current_state})`);
-    } else if (ctx.step === 'ask_datetime' || ctx.step === 'confirm') {
-      const execId = `bv2_init_${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
-      const { lifecycle_id } = await createBookingLifecycle(supabase, {
-        empresa_id,
-        conversation_id,
-        execution_id: execId,
-        metadata: { source: 'booking-v2', reason: ctx.reason },
-      });
-      lifecycleId = lifecycle_id;
-      console.log(`[BookingV2] Created new lifecycle: ${lifecycleId}`);
-    }
-
     const parsedIncoming = extractBookingDatetimeParts(user_message);
     console.log(`[DatetimeFix] Parsed date=${parsedIncoming.dateStr ?? 'null'} time=${parsedIncoming.timeStr ?? 'null'}`);
     if (parsedIncoming.iso) {
@@ -1352,50 +1328,18 @@ Deno.serve(async (req) => {
       resetSuggestions(ctx);
 
       // Check availability before confirming
-const avail = await fetchAvailability(empresa_id, ctx.service_id, ctx.booking_datetime);
+      const avail = await fetchAvailability(empresa_id, ctx.service_id, ctx.booking_datetime);
 
-if (avail.available) {
+      if (avail.available) {
+        ctx.step = 'confirm';
 
-  // STEP 1 — availability_checked
-  if (lifecycleId) {
-    await processBookingEvent(supabase, {
-      lifecycle_id: lifecycleId,
-      event_type: 'availability_checked',
-      execution_id: `bv2_avail_${Date.now()}`,
-      payload: { requested_slot: ctx.booking_datetime },
-    });
-  }
-
-  // 🔥 STEP 2 — slot_selected (FALTAVA ISTO)
-  if (lifecycleId) {
-    await processBookingEvent(supabase, {
-      lifecycle_id: lifecycleId,
-      event_type: 'slot_selected',
-      execution_id: `bv2_slot_${Date.now()}`,
-      payload: { selected_slot: ctx.booking_datetime },
-    });
-  }
-
-  // STEP 3 — confirmation_requested
-  if (lifecycleId) {
-    await processBookingEvent(supabase, {
-      lifecycle_id: lifecycleId,
-      event_type: 'confirmation_requested',
-      execution_id: `bv2_confirm_${Date.now()}`,
-      payload: { requested_slot: ctx.booking_datetime },
-    });
-  }
-
-  ctx.step = 'confirm';
-
-  return jsonResponse({
-    response: `Perfeito, só para confirmar:\n\n📅 Data: ${formatDatetimePT(ctx.booking_datetime).split(' às ')[0]}\n⏰ Hora: ${formatTimePT(ctx.booking_datetime)}\n\nEstá tudo correto?`,
-    context: ctx,
-    booking_created: false,
-    action: 'ask_confirmation',
-    payload: { datetime: ctx.booking_datetime },
-  });
-}
+        return jsonResponse({
+          response: `Perfeito, só para confirmar:\n\n📅 Data: ${formatDatetimePT(ctx.booking_datetime).split(' às ')[0]}\n⏰ Hora: ${formatTimePT(ctx.booking_datetime)}\n\nEstá tudo correto?`,
+          context: ctx,
+          booking_created: false,
+          action: 'ask_confirmation',
+          payload: { datetime: ctx.booking_datetime },
+        });
       } else {
         // Store alternatives as structured suggestion slots
         if (avail.alternatives.length > 0) {
@@ -1666,109 +1610,73 @@ if (avail.available) {
       }
     }
 
-    const dt = result.context.booking_datetime;
-const datePart = dt.substring(0, 10);
-const timePart = dt.substring(11, 16);
+    // ── Direct DB insert for booking creation ──
+    if (result.createBooking && result.context.booking_datetime) {
+      const dt = result.context.booking_datetime;
 
-const { error, data } = await supabase
-  .from('agendamentos')
-  .insert({
-    empresa_id,
-    data: datePart,
-    hora: timePart,
-    start_datetime: dt,
-    customer_name: result.context.customer_name,
-    customer_email: result.context.customer_email,
-    customer_phone: result.context.customer_phone,
-    service_id: result.context.service_id,
-    estado: 'confirmado',
-  })
-  .select()
-  .single();
-
-if (error) {
-  console.error('[BookingV2] Direct DB error:', error);
-
-  return jsonResponse({
-    response: 'Ocorreu um erro ao criar o agendamento. Por favor tente novamente.',
-    context: result.context,
-    booking_created: false,
-    action: 'booking_error',
-    payload: { error: 'db_insert_failed' },
-  });
-}
-
-console.log('[BookingV2] ✅ Booking created directly:', data.id);
-
-result.context.appointment_id = data.id;
-
-        // Ensure confirmation requested
-        preEvents.push({
-          event: 'confirmation_requested',
-          payload: { selected_slot: dt },
-        });
-
-        // Process pre-events to advance lifecycle state
-        for (const pe of preEvents) {
-          const preExecId = `bv2_pre_${pe.event}_${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
-          const preResult = await processBookingEvent(supabase, {
-            lifecycle_id: lifecycleId,
-            event_type: pe.event,
-            payload: pe.payload,
-            execution_id: preExecId,
-          });
-          if (!preResult.success) {
-            console.log(`[BookingV2] Lifecycle pre-event ${pe.event} skipped: ${preResult.error_code} (non-blocking)`);
-          }
-        }
-
-        // Now process the actual confirmation
-        const commitResult = await processBookingEvent(supabase, {
-          lifecycle_id: lifecycleId,
-          event_type: 'user_confirmed',
-          payload: {
-            selected_slot: dt,
-            customer_name: result.context.customer_name,
-            customer_email: result.context.customer_email,
-            customer_phone: result.context.customer_phone,
-            service_id: result.context.service_id,
-          },
-          execution_id: execId,
-        });
-
-        if (commitResult.success) {
-          console.log(`[BookingV2] ✅ Booking committed via lifecycle: appointment=${commitResult.appointment_id}`);
-          if (commitResult.appointment_id) {
-            result.context.appointment_id = commitResult.appointment_id;
-          }
-          if (!result.context.service_id) {
-            console.warn('[BookingV2] ⚠ Booking created without service_id');
-          }
-        } else if (commitResult.error_code === 'slot_conflict') {
-          console.log('[BookingV2] Race condition caught via lifecycle — slot taken');
-          result.response = 'Lamentamos, esse horário foi ocupado entretanto. Por favor escolha outro horário.';
-          result.context.step = 'confirm';
-          result.createBooking = false;
-          result.action = 'race_condition';
-          result.payload = { requested_datetime: dt };
-        } else {
-          console.error(`[BookingV2] Lifecycle commit failed: ${commitResult.error_code} — ${commitResult.error_message}`);
-          result.response = 'Ocorreu um erro ao criar o agendamento. Por favor tente novamente.';
-          result.context.step = 'confirm';
-          result.action = 'booking_error';
-          result.payload = { error: commitResult.error_code || 'lifecycle_commit_failed' };
-        }
-      } else {
-        console.error('[BookingV2] ❌ Missing lifecycleId — booking blocked');
-
+      // ── Final race condition check ──
+      const finalCheck = await fetchAvailability(empresa_id, result.context.service_id, dt);
+      if (!finalCheck.available) {
+        console.log('[BookingV2] Race condition detected — slot taken:', dt);
+        result.context.booking_datetime = null;
+        result.context._bv2_selected_slot = null;
+        result.context.step = 'ask_datetime';
         return jsonResponse({
-          response: 'Ocorreu um erro ao processar o agendamento. Vamos tentar novamente.',
+          response: 'Lamentamos, esse horário foi ocupado entretanto. Pode escolher outro horário?',
+          context: result.context,
+          booking_created: false,
+          action: 'race_condition',
+          payload: { requested_datetime: dt },
+        });
+      }
+
+      const datePart = dt.substring(0, 10);
+      const timePart = dt.substring(11, 16);
+
+      const { error, data } = await supabase
+        .from('agendamentos')
+        .insert({
+          empresa_id,
+          data: datePart,
+          hora: timePart,
+          start_datetime: dt,
+          customer_name: result.context.customer_name,
+          customer_email: result.context.customer_email,
+          customer_phone: result.context.customer_phone,
+          service_id: result.context.service_id,
+          estado: 'confirmado',
+        })
+        .select()
+        .single();
+
+      if (error) {
+        // ── DB-level unique constraint violation (race condition at DB layer) ──
+        if (error.code === '23505') {
+          console.log('[BookingV2] DB-level race condition detected (unique constraint):', dt);
+          result.context.booking_datetime = null;
+          result.context._bv2_selected_slot = null;
+          result.context.step = 'ask_datetime';
+          return jsonResponse({
+            response: 'Lamentamos, esse horário acabou de ser reservado. Pode escolher outro horário?',
+            context: result.context,
+            booking_created: false,
+            action: 'race_condition_db',
+            payload: { requested_datetime: dt },
+          });
+        }
+
+        console.error('[BookingV2] Direct DB error:', error);
+        return jsonResponse({
+          response: 'Ocorreu um erro ao criar o agendamento. Por favor tente novamente.',
           context: result.context,
           booking_created: false,
           action: 'booking_error',
-          payload: { error: 'missing_lifecycle' },
+          payload: { error: 'db_insert_failed' },
         });
       }
+
+      console.log('[BookingV2] ✅ Booking created:', data.id);
+      result.context.appointment_id = data.id;
     }
 
     // ── Deterministic Response Variation Layer ──
@@ -1828,6 +1736,54 @@ result.context.appointment_id = data.id;
   }
 });
 
+// ─── Availability Check ─────────────────────────────────────────────────────
+async function fetchAvailability(
+  empresa_id: string,
+  service_id: string | null,
+  datetime: string
+): Promise<{ available: boolean; alternatives: string[] }> {
+
+  const supabase = getSupabase();
+
+  const datePart = datetime.substring(0, 10);
+  const timePart = datetime.substring(11, 16);
+
+  const { data: bookings } = await supabase
+    .from('agendamentos')
+    .select('hora')
+    .eq('empresa_id', empresa_id)
+    .eq('data', datePart)
+    .in('estado', ['pendente', 'confirmado']);
+
+  const takenTimes = new Set(
+    (bookings || []).map((b: { hora: string }) => b.hora.substring(0, 5))
+  );
+
+  const isTaken = takenTimes.has(timePart);
+
+  if (!isTaken) {
+    return { available: true, alternatives: [] };
+  }
+
+  const alternatives: string[] = [];
+
+  for (let h = 8; h <= 19; h++) {
+    for (const m of [0, 30]) {
+      const slot = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      if (!takenTimes.has(slot)) {
+        alternatives.push(`${datePart}T${slot}:00`);
+      }
+      if (alternatives.length >= 3) break;
+    }
+    if (alternatives.length >= 3) break;
+  }
+
+  return {
+    available: false,
+    alternatives,
+  };
+}
+
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 // deno-lint-ignore no-explicit-any
@@ -1836,4 +1792,3 @@ function jsonResponse(data: any): Response {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
-
