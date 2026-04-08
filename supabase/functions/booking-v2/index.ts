@@ -691,14 +691,6 @@ STRICT RULES:
       return originalResponse;
     }
 
-    const keyPatterns = extractKeyVariables(originalResponse, payload);
-    const missing = keyPatterns.filter(v => !refined.includes(v));
-
-    if (missing.length > 0) {
-      console.log('[LLMRefine] Missing variables → fallback');
-      return originalResponse;
-    }
-
     console.log(`[LLMRefine] ✓ Refined (${action})`);
     return refined;
 
@@ -707,7 +699,6 @@ STRICT RULES:
     return originalResponse;
   }
 }
-
 
 // ─── Name / Email / Phone extraction ─────────────────────────────────────────
 function extractIdentity(message: string, ctx: BookingV2Context): Partial<BookingV2Context> {
