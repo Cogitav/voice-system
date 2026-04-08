@@ -125,19 +125,12 @@ function getTemplate(key: EmailTemplateKey, vars: Record<string, string>): Email
 // Email Sender
 // =============================================
 
-export async function sendPlatformEmail(params: SendPlatformEmailParams): Promise<{ success: boolean; error?: string }> {
-  const { empresa_id, template, to, variables, supabase } = params;
+const apiKey = Deno.env.get('RESEND_API_KEY');
 
-  const apiKey = RESEND_API_KEY();
-  if (!apiKey) {
-    console.warn('[EmailEngine] RESEND_API_KEY not configured — skipping email');
-    return { success: false, error: 'RESEND_API_KEY not configured' };
-  }
-
-  if (!to) {
-    console.warn('[EmailEngine] No recipient email — skipping');
-    return { success: false, error: 'No recipient email' };
-  }
+if (!apiKey) {
+  console.warn('[EmailEngine] RESEND_API_KEY not configured — skipping email');
+  return { success: false, error: 'RESEND_API_KEY not configured' };
+}
 
   const empresaNome = variables['empresa_nome'] || 'Empresa';
   const emailTemplate = getTemplate(template, variables);
