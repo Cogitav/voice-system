@@ -3522,6 +3522,9 @@ async function handlePreResponseStateTransition(
 // =============================================
 
 Deno.serve(async (req) => {
+
+console.log('ANON KEY:', Deno.env.get('SUPABASE_ANON_KEY'));
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
