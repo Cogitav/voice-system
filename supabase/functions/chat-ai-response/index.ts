@@ -1459,7 +1459,7 @@ CONTEXT:
 
 Action: ${action}
 Booking state: ${JSON.stringify(bookingContext || {})}
-Payload: ${JSON.stringify(result.payload)}
+Payload: ${JSON.stringify(payload)}
 
 Recent conversation:
 ${conversationSummary || '(first message)'}
@@ -4438,7 +4438,7 @@ Deno.serve(async (req) => {
     'Content-Type': 'application/json',
     'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
   },
-  body: JSON.stringify(result.payload),
+  body: JSON.stringify(bv2Context),
 });
 
           if (bv2Resp.ok) {
