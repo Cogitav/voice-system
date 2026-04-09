@@ -65,7 +65,8 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 // =============================================
 // Runtime Logger (non-blocking, never throws)
 // Uses dedicated service-role client so RLS is bypassed.
@@ -1458,7 +1459,7 @@ CONTEXT:
 
 Action: ${action}
 Booking state: ${JSON.stringify(bookingContext || {})}
-Payload: ${JSON.stringify(payload)}
+Payload: ${JSON.stringify(result.payload)}
 
 Recent conversation:
 ${conversationSummary || '(first message)'}
@@ -3523,7 +3524,7 @@ async function handlePreResponseStateTransition(
 
 Deno.serve(async (req) => {
 
-console.log('ANON KEY:', Deno.env.get('SUPABASE_ANON_KEY'));
+  console.log('ANON KEY:', Deno.env.get('SUPABASE_ANON_KEY'));
 
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -4437,7 +4438,7 @@ console.log('ANON KEY:', Deno.env.get('SUPABASE_ANON_KEY'));
     'Content-Type': 'application/json',
     'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
   },
-  body: JSON.stringify(payload),
+  body: JSON.stringify(result.payload),
 });
 
           if (bv2Resp.ok) {
