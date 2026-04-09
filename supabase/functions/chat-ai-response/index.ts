@@ -73,7 +73,7 @@ const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 // =============================================
 async function runtimeLog(
   _supabase: unknown,
-  empresaId: string | undefined,
+  empresa_id: string | undefined,
   conversationId: string | undefined,
   eventType: string,
   message: string,
@@ -85,7 +85,7 @@ async function runtimeLog(
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
     await serviceClient.from('agent_runtime_logs').insert({
-      empresa_id: empresaId || null,
+      empresa_id: empresa_id || null,
       conversation_id: conversationId || null,
       event_type: eventType,
       message: message,
@@ -309,7 +309,7 @@ async function handleBookingFailure(
   // deno-lint-ignore no-explicit-any
   supabase: any,
   conversationId: string,
-  empresaId: string,
+  empresa_id: string,
   bookingResult: BookingResult,
   // deno-lint-ignore no-explicit-any
   currentContext: Record<string, any>,
@@ -342,7 +342,7 @@ async function handleBookingFailure(
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseAnonKey}` },
             body: JSON.stringify({
-              company_id: empresaId,
+              company_id: empresa_id,
               service_id: serviceId,
               requested_start: currentContext.preferred_date || (currentContext.selected_datetime && String(currentContext.selected_datetime).includes('T') ? currentContext.selected_datetime : null),
               max_suggestions: 5,
@@ -431,7 +431,7 @@ async function handleBookingFailure(
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseAnonKey}` },
           body: JSON.stringify({
-            company_id: empresaId,
+            company_id: empresa_id,
             service_id: serviceId,
             requested_start: currentContext.preferred_date || (currentContext.selected_datetime && String(currentContext.selected_datetime).includes('T') ? currentContext.selected_datetime : null),
             max_suggestions: 5,
@@ -527,7 +527,7 @@ IMPORTANTE: Usa service_name com o nome do serviço em linguagem natural (ex: "T
 // deno-lint-ignore no-explicit-any
 async function runServiceResolutionPipeline(
   supabase: any,
-  empresaId: string,
+  empresa_id: string,
   reasonOriginal?: string,
 ): Promise<{ service_id: string; reason_normalized: string } | null> {
   if (!reasonOriginal) {
@@ -550,7 +550,7 @@ async function runServiceResolutionPipeline(
   const { data: services } = await supabase
     .from('scheduling_services')
     .select('id, name, description, priority, scheduling_service_resources!inner(resource_id)')
-    .eq('empresa_id', empresaId)
+    .eq('empresa_id', empresa_id)
     .eq('status', 'active')
     .eq('bookable', true);
 
@@ -633,7 +633,7 @@ async function handleToolCall(
   toolName: string,
   // deno-lint-ignore no-explicit-any
   toolArgs: any,
-  empresaId: string,
+  empresa_id: string,
   agentId: string | null,
   conversationId: string,
   // deno-lint-ignore no-explicit-any
@@ -816,7 +816,7 @@ async function handleToolCall(
       };
     }
 
-    if (!empresaId) {
+    if (!empresa_id) {
       console.error('[ChatAI] BLOCKED: Missing empresa_id before booking');
       return {
         result: JSON.stringify({
@@ -828,14 +828,14 @@ async function handleToolCall(
       };
     }
 
-    console.log(`[ChatAI] empresa_id: ${empresaId}`);
+    console.log(`[ChatAI] empresa_id: ${empresa_id}`);
 
     // State + lock already validated above in HARD LOCK section
     console.log('[Scheduling] Delegating to BookingEngine');
 
     const bookingResult: BookingResult = await createInternalBooking({
       supabase,
-      company_id: empresaId,
+      company_id: empresa_id,
       agent_id: agentId || undefined,
       conversation_id: conversationId,
       customer_name: toolArgs.customer_name || '',
@@ -881,7 +881,7 @@ async function handleToolCall(
       console.log('[BOOKING_EXECUTION] SUCCESS');
       console.log(`[BOOKING_EXECUTION] Final decision: SUCCESS_CONFIRMED`);
       // === RUNTIME LOG: Booking success ===
-      runtimeLog(supabase, empresaId, conversationId, 'booking_result', 'Booking succeeded', { appointment_id: bookingResult.appointment_id, success: true });
+      runtimeLog(supabase, empresa_id, conversationId, 'booking_result', 'Booking succeeded', { appointment_id: bookingResult.appointment_id, success: true });
 
       // Re-fetch context from DB to capture ReasonRefinement updates
       const postBookingCtx = await getConversationContext(supabase, conversationId);
@@ -1047,13 +1047,13 @@ async function handleToolCall(
     // === BOOKING FAILED — Deterministic Conflict Recovery Engine ===
     console.log(`[Scheduling] Final decision: FAILED_${bookingResult.error_code || bookingResult.state}`);
     // === RUNTIME LOG: Booking failure ===
-    runtimeLog(supabase, empresaId, conversationId, 'booking_result', `Booking failed: ${bookingResult.error_code || 'unknown'}`, { success: false, error_code: bookingResult.error_code, error_message: bookingResult.message });
+    runtimeLog(supabase, empresa_id, conversationId, 'booking_result', `Booking failed: ${bookingResult.error_code || 'unknown'}`, { success: false, error_code: bookingResult.error_code, error_message: bookingResult.message });
     console.log('[CommitGuard] Atomic rollback executed');
 
     return await handleBookingFailure(
       supabase,
       conversationId,
-      empresaId,
+      empresa_id,
       bookingResult,
       currentContext,
       resolvedServiceId,
@@ -1065,11 +1065,11 @@ async function handleToolCall(
 
 // Get the default chat agent for a company with fallback logic
 // deno-lint-ignore no-explicit-any
-async function getDefaultChatAgent(supabase: any, empresaId: string): Promise<Agent | null> {
+async function getDefaultChatAgent(supabase: any, empresa_id: string): Promise<Agent | null> {
   const { data: defaultAgent } = await supabase
     .from('agentes')
     .select('id, nome, prompt_base, personalidade, contexto_negocio, is_default_chat_agent, response_style')
-    .eq('empresa_id', empresaId)
+    .eq('empresa_id', empresa_id)
     .eq('is_default_chat_agent', true)
     .eq('status', 'ativo')
     .limit(1)
@@ -1080,7 +1080,7 @@ async function getDefaultChatAgent(supabase: any, empresaId: string): Promise<Ag
   const { data: anyAgent } = await supabase
     .from('agentes')
     .select('id, nome, prompt_base, personalidade, contexto_negocio, is_default_chat_agent, response_style')
-    .eq('empresa_id', empresaId)
+    .eq('empresa_id', empresa_id)
     .eq('status', 'ativo')
     .order('created_at', { ascending: false })
     .limit(1)
@@ -1095,7 +1095,7 @@ async function getDefaultChatAgent(supabase: any, empresaId: string): Promise<Ag
 // deno-lint-ignore no-explicit-any
 async function registerCreditUsage(
   supabase: any,
-  empresaId: string,
+  empresa_id: string,
   eventType: string,
   referenceId: string
 ) {
@@ -1108,7 +1108,7 @@ async function registerCreditUsage(
 
   const creditsConsumed = CREDIT_VALUES[eventType] || 0;
   if (creditsConsumed === 0) return;
-  if (!empresaId || !referenceId) {
+  if (!empresa_id || !referenceId) {
     console.error('[Credits] BLOCKED: Missing empresa_id or reference_id');
     return;
   }
@@ -1127,7 +1127,7 @@ async function registerCreditUsage(
   }
 
   await supabase.from('credits_events').insert({
-    empresa_id: empresaId,
+    empresa_id: empresa_id,
     event_type: eventType,
     credits_consumed: creditsConsumed,
     reference_id: referenceId,
@@ -1139,7 +1139,7 @@ async function registerCreditUsage(
   const { data: usage } = await supabase
     .from('credits_usage')
     .select('id, credits_used')
-    .eq('empresa_id', empresaId)
+    .eq('empresa_id', empresa_id)
     .eq('month', currentMonth)
     .maybeSingle();
 
@@ -1150,14 +1150,14 @@ async function registerCreditUsage(
       .eq('id', usage.id);
   } else {
     await supabase.from('credits_usage').insert({
-      empresa_id: empresaId,
+      empresa_id: empresa_id,
       month: currentMonth,
       credits_used: creditsConsumed,
       credits_limit: 1000,
     });
   }
 
-  console.log(`[Credits] ✓ Registered: ${eventType} = ${creditsConsumed} for empresa ${empresaId}`);
+  console.log(`[Credits] ✓ Registered: ${eventType} = ${creditsConsumed} for empresa ${empresa_id}`);
 }
 
 // =============================================
@@ -2123,7 +2123,7 @@ async function handlePreResponseStateTransition(
         // === SERVICE FALLBACK: If reason_normalized exists, resolve service_id automatically ===
         if (context.reason_normalized) {
           console.log(`[BookingGuard] service_id missing but reason_normalized exists ("${context.reason_normalized}") — attempting auto-resolve`);
-          const fallbackResolved = await runServiceResolutionPipeline(supabase, empresaId, context.reason_normalized as string);
+          const fallbackResolved = await runServiceResolutionPipeline(supabase, empresa_id, context.reason_normalized as string);
           if (fallbackResolved) {
             mergeData.service_id = fallbackResolved.service_id;
             mergeData.reason_normalized = fallbackResolved.reason_normalized;
@@ -2137,7 +2137,7 @@ async function handlePreResponseStateTransition(
 
         // Try to resolve from reason + message before asking
         const combinedInput = [(context.reason_original as string) || (context.reason as string) || '', userMessage].filter(Boolean).join(' ').trim();
-        const resolved = combinedInput ? await runServiceResolutionPipeline(supabase, empresaId, combinedInput) : null;
+        const resolved = combinedInput ? await runServiceResolutionPipeline(supabase, empresa_id, combinedInput) : null;
 
         if (resolved) {
           mergeData.service_id = resolved.service_id;
@@ -2193,7 +2193,7 @@ async function handlePreResponseStateTransition(
 
     // Attempt to resolve from the user's latest message + any existing reason
     const combinedInput = [(context.reason_original as string) || (context.reason as string) || '', userMessage].filter(Boolean).join(' ').trim();
-    const resolved = await runServiceResolutionPipeline(supabase, empresaId, combinedInput);
+    const resolved = await runServiceResolutionPipeline(supabase, empresa_id, combinedInput);
 
     if (resolved) {
       console.log(`[ServiceSelection] Service resolved: ${resolved.reason_normalized} (${resolved.service_id})`);
@@ -2316,7 +2316,7 @@ async function handlePreResponseStateTransition(
           preValidationMessage: availMessage,
         };
       } else if (context.reason_normalized && !context.service_id) {
-        const autoResolved = await runServiceResolutionPipeline(supabase, empresaId, context.reason_normalized as string);
+        const autoResolved = await runServiceResolutionPipeline(supabase, empresa_id, context.reason_normalized as string);
         if (autoResolved) {
           console.log(`[ServiceLockGuard] Auto-resolved service from reason_normalized: ${autoResolved.reason_normalized}`);
           await mergeConversationContext(supabase, conversationId, { service_id: autoResolved.service_id, reason_normalized: autoResolved.reason_normalized });
@@ -2552,7 +2552,7 @@ async function handlePreResponseStateTransition(
       const smartMatchInput = ((context.reason_normalized as string) || (context.reason_original as string) || (context.reason as string) || '').trim();
       if (smartMatchInput) {
         console.log(`[SmartMatch] reason exists but no service_id — attempting auto-resolve: "${smartMatchInput}"`);
-        const smartResolved = await runServiceResolutionPipeline(supabase, empresaId, smartMatchInput);
+        const smartResolved = await runServiceResolutionPipeline(supabase, empresa_id, smartMatchInput);
         if (smartResolved) {
           console.log(`[SmartMatch] Auto-resolved service: ${smartResolved.reason_normalized} (${smartResolved.service_id})`);
           await mergeConversationContext(supabase, conversationId, {
@@ -2597,7 +2597,7 @@ async function handlePreResponseStateTransition(
         const combinedReasonInput = [(updatedContext.reason_original as string) || (updatedContext.reason as string) || '', userMessage].filter(Boolean).join(' ').trim();
         const resolved = await runServiceResolutionPipeline(
           supabase,
-          empresaId,
+          empresa_id,
           combinedReasonInput,
         );
 
@@ -3564,6 +3564,8 @@ Deno.serve(async (req) => {
       );
     }
 
+    const empresa_id = conversation.empresa_id;
+
     const permissions: ServicePermissions = {
       service_chat_enabled: conversation.empresas?.service_chat_enabled ?? false,
       service_voice_enabled: conversation.empresas?.service_voice_enabled ?? false,
@@ -4432,13 +4434,18 @@ Deno.serve(async (req) => {
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-          await fetch(`${SUPABASE_URL}/functions/v1/booking-v2`, {
+          const bv2Resp = await fetch(`${supabaseUrl}/functions/v1/booking-v2`, {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
-    'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
+    'apikey': supabaseAnonKey,
   },
-  body: JSON.stringify(bv2Context),
+  body: JSON.stringify({
+    conversation_id: conversationId,
+    empresa_id: empresa_id,
+    user_message: message,
+    context: bv2Context,
+  }),
 });
 
           if (bv2Resp.ok) {
