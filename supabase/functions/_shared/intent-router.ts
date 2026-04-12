@@ -1,198 +1,109 @@
-/**
- * Intent Router Layer v1.0
- *
- * Deterministic intent classification for all conversation channels
- * (chat, voice, widgets). Runs BEFORE the service resolver and booking pipeline.
- *
- * This module ONLY classifies intent and sets current_intent.
- * It does NOT modify: service_id, booking_in_progress, conversation_state.
- */
+import { Intent, ConversationContext } from './types.ts';
+import { callLLMSimple } from './llm-provider.ts';
 
-// =============================================
-// Platform Intents
-// =============================================
-
-export enum Intent {
-  BOOKING_NEW = 'BOOKING_NEW',
-  BOOKING_RESCHEDULE = 'BOOKING_RESCHEDULE',
-  BOOKING_CANCEL = 'BOOKING_CANCEL',
-  AVAILABILITY_REQUEST = 'AVAILABILITY_REQUEST',
-  PRICE_REQUEST = 'PRICE_REQUEST',
-  HUMAN_ESCALATION = 'HUMAN_ESCALATION',
-  COMMERCIAL_INFO = 'COMMERCIAL',
-  SUPPORT = 'SUPPORT',
-  OTHER = 'OTHER',
+interface IntentResult {
+  intent: Intent;
+  confidence: number;
+  method: 'deterministic' | 'llm';
 }
 
-// =============================================
-// Keyword Dictionaries
-// =============================================
+const BOOKING_KEYWORDS = [
+  'marcar', 'agendar', 'reservar', 'marcação', 'agendamento', 'reserva',
+  'quero marcar', 'quero agendar', 'preciso marcar', 'gostava de marcar',
+  'appointment', 'booking',
+];
 
-const INTENT_KEYWORDS: Record<Intent, string[]> = {
-  [Intent.BOOKING_NEW]: [
-    'marcar', 'agendar', 'consulta', 'reuniao', 'appointment', 'booking',
-    'visita', 'reservar', 'marcacao', 'agendamento',
-  ],
-  [Intent.BOOKING_RESCHEDULE]: [
-    'reagendar', 'alterar data', 'mudar horario', 'trocar data',
-    'mudar data', 'alterar horario',
-  ],
-  [Intent.BOOKING_CANCEL]: [
-    'cancelar', 'anular', 'desmarcar',
-  ],
-  [Intent.AVAILABILITY_REQUEST]: [
-    'disponibilidade', 'disponivel', 'quando posso', 'quando podem',
-    'horarios disponiveis', 'vagas', 'livre', 'quando tem', 'quando ha',
-    'proxima vaga', 'proximo horario',
-    'de manha', 'da manha', 'pela manha', 'de tarde', 'da tarde', 'pela tarde',
-  ],
-  [Intent.PRICE_REQUEST]: [
-    'preco', 'quanto custa', 'valor', 'custo', 'price',
-    'quanto pago', 'mensalidade', '€', 'euros',
-  ],
-  [Intent.HUMAN_ESCALATION]: [
-    'falar com alguem', 'falar com humano', 'atendimento humano',
-    'operador', 'humano', 'falar com a equipa', 'ligar para alguem',
-    'falar com pessoa',
-  ],
-  [Intent.COMMERCIAL_INFO]: [
-    'informacao', 'informacoes', 'saber mais', 'explicar', 'como funciona',
-    'planos', 'horarios', 'servicos', 'tabela',
-  ],
-  [Intent.SUPPORT]: [
-    'problema', 'erro', 'ajuda tecnica', 'nao funciona', 'bug',
-  ],
-  [Intent.OTHER]: [],
-};
+const RESCHEDULE_KEYWORDS = [
+  'remarcar', 'reagendar', 'alterar', 'mudar', 'trocar', 'adiar',
+  'muda', 'altera', 'outra hora', 'outro dia', 'outro horário',
+  'remarcação', 'reagendamento',
+];
 
-// =============================================
-// Booking Intent Family
-// =============================================
+const CANCEL_KEYWORDS = [
+  'cancelar', 'anular', 'desmarcar', 'cancelamento', 'cancela',
+  'não quero', 'nao quero', 'desisto', 'deixa estar',
+];
 
-export const BOOKING_INTENT_FAMILY = new Set<Intent>([
-  Intent.BOOKING_NEW,
-  Intent.BOOKING_RESCHEDULE,
-  Intent.BOOKING_CANCEL,
-  Intent.AVAILABILITY_REQUEST,
-]);
+const HUMAN_KEYWORDS = [
+  'falar com', 'falar a', 'humano', 'pessoa', 'atendente', 'operador',
+  'funcionário', 'funcionario', 'responsável', 'responsavel',
+  'quero falar', 'preciso falar', 'transfere', 'transferir',
+];
 
-export function isBookingIntent(intent: Intent): boolean {
-  return BOOKING_INTENT_FAMILY.has(intent);
-}
+const INFO_KEYWORDS = [
+  'quanto', 'preço', 'preco', 'valor', 'custo', 'quanto custa',
+  'horário', 'horario', 'quando', 'onde', 'como', 'o que é', 'o que faz',
+  'informação', 'informacao', 'dúvida', 'duvida', 'pergunta',
+  'que serviços', 'que servicos', 'o que têm', 'o que tem',
+];
 
-// =============================================
-// Deterministic Classification
-// =============================================
+function detectDeterministic(message: string, context: ConversationContext): IntentResult | null {
+  const lower = message.toLowerCase();
 
-function normalizeForIntent(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\w\s€]/g, '')
-    .trim();
-}
-
-/**
- * Tier 1 — Deterministic keyword scoring.
- * Returns the intent if a clear winner exists, or null if ambiguous.
- */
-export function classifyIntentDeterministic(message: string): Intent | null {
-  const normalized = normalizeForIntent(message);
-
-  const scores: Record<string, number> = {};
-  for (const [intent, keywords] of Object.entries(INTENT_KEYWORDS)) {
-    let score = 0;
-    for (const kw of keywords) {
-      if (normalized.includes(kw)) {
-        score += kw.split(' ').length > 1 ? 15 : 10;
-      }
+  // If in booking flow, positive confirmations are not new intents
+  const bookingStates = ['collecting_data', 'awaiting_slot_selection', 'awaiting_confirmation', 'booking_processing'];
+  if (bookingStates.includes(context.state)) {
+    if (/\b(sim|confirmo|confirmar|ok|certo|correto|exato|perfeito|ótimo|otimo|yes)\b/.test(lower)) {
+      return { intent: context.current_intent ?? 'BOOKING_NEW', confidence: 0.95, method: 'deterministic' };
     }
-    scores[intent] = score;
   }
 
-  const sorted = Object.entries(scores)
-    .filter(([, s]) => s > 0)
-    .sort((a, b) => b[1] - a[1]);
+  for (const kw of CANCEL_KEYWORDS) {
+    if (lower.includes(kw)) return { intent: 'CANCEL', confidence: 0.9, method: 'deterministic' };
+  }
 
-  if (sorted.length === 0) return null;
-  if (sorted.length === 1) return sorted[0][0] as Intent;
-  if (sorted[0][1] - sorted[1][1] >= 5) return sorted[0][0] as Intent;
+  for (const kw of RESCHEDULE_KEYWORDS) {
+    if (lower.includes(kw)) return { intent: 'RESCHEDULE', confidence: 0.9, method: 'deterministic' };
+  }
+
+  for (const kw of HUMAN_KEYWORDS) {
+    if (lower.includes(kw)) return { intent: 'HUMAN_REQUEST', confidence: 0.95, method: 'deterministic' };
+  }
+
+  for (const kw of BOOKING_KEYWORDS) {
+    if (lower.includes(kw)) return { intent: 'BOOKING_NEW', confidence: 0.85, method: 'deterministic' };
+  }
+
+  for (const kw of INFO_KEYWORDS) {
+    if (lower.includes(kw)) return { intent: 'INFO_REQUEST', confidence: 0.8, method: 'deterministic' };
+  }
 
   return null;
 }
 
-/**
- * Full intent classification — deterministic only.
- * If no clear match, returns OTHER.
- */
-export function classifyIntent(message: string): Intent {
-  const deterministic = classifyIntentDeterministic(message);
-  if (deterministic) {
-    console.log(`[IntentRouter] Deterministic: ${deterministic}`);
-    return deterministic;
+export async function classifyIntent(
+  message: string,
+  context: ConversationContext,
+  empresaId: string
+): Promise<IntentResult> {
+  // Deterministic first
+  const deterministic = detectDeterministic(message, context);
+  if (deterministic) return deterministic;
+
+  // LLM fallback
+  try {
+    const systemPrompt = `Classifica a intenção da mensagem do utilizador. Responde APENAS com um JSON no formato:
+{"intent": "INTENT", "confidence": 0.0}
+
+Intenções possíveis:
+- BOOKING_NEW: quer marcar uma consulta, serviço ou agendamento
+- RESCHEDULE: quer alterar ou remarcar um agendamento existente
+- CANCEL: quer cancelar um agendamento
+- INFO_REQUEST: quer informações sobre serviços, preços, horários
+- HUMAN_REQUEST: quer falar com uma pessoa humana
+- OTHER: qualquer outra coisa
+
+Contexto atual: estado="${context.state}", intenção anterior="${context.current_intent ?? 'nenhuma'}"`;
+
+    const response = await callLLMSimple(systemPrompt, message, empresaId, 'json');
+    const parsed = JSON.parse(response);
+
+    if (parsed.intent && ['BOOKING_NEW','RESCHEDULE','CANCEL','INFO_REQUEST','HUMAN_REQUEST','OTHER'].includes(parsed.intent)) {
+      return { intent: parsed.intent as Intent, confidence: parsed.confidence ?? 0.7, method: 'llm' };
+    }
+  } catch {
+    // LLM failed — return OTHER
   }
-  console.log('[IntentRouter] No deterministic match — returning OTHER');
-  return Intent.OTHER;
-}
 
-// =============================================
-// Routing Decision
-// =============================================
-
-export type IntentRoute =
-  | 'price_engine'
-  | 'booking_pipeline'
-  | 'human_handoff'
-  | 'knowledge_base'
-  | 'ai_conversation';
-
-/**
- * Maps a classified intent to a routing destination.
- * This is a pure function — no side effects.
- */
-export function routeIntent(intent: Intent): IntentRoute {
-  switch (intent) {
-    case Intent.PRICE_REQUEST:
-      return 'price_engine';
-    case Intent.BOOKING_NEW:
-    case Intent.BOOKING_RESCHEDULE:
-    case Intent.BOOKING_CANCEL:
-    case Intent.AVAILABILITY_REQUEST:
-      return 'booking_pipeline';
-    case Intent.HUMAN_ESCALATION:
-      return 'human_handoff';
-    case Intent.COMMERCIAL_INFO:
-      return 'knowledge_base';
-    case Intent.SUPPORT:
-    case Intent.OTHER:
-    default:
-      return 'ai_conversation';
-  }
-}
-
-// =============================================
-// Router Entry Point
-// =============================================
-
-export interface IntentRouterResult {
-  intent: Intent;
-  route: IntentRoute;
-  isBooking: boolean;
-}
-
-/**
- * Single entry point for the intent router.
- * Classifies the message and returns the routing decision.
- *
- * Does NOT modify any context or state — caller is responsible for that.
- */
-export function runIntentRouter(message: string): IntentRouterResult {
-  const intent = classifyIntent(message);
-  const route = routeIntent(intent);
-  const booking = isBookingIntent(intent);
-
-  console.log(`[IntentRouter] Result: intent=${intent}, route=${route}, isBooking=${booking}`);
-
-  return { intent, route, isBooking: booking };
+  return { intent: 'OTHER', confidence: 0.5, method: 'deterministic' };
 }

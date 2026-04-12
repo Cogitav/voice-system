@@ -1,35 +1,53 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { closeIdleConversations } from '../_shared/auto-close.ts';
+import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
+import { getServiceClient } from '../_shared/supabase-client.ts';
+import { LIMITS } from '../_shared/constants.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-Deno.serve(async (req) => {
+serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
+    const db = getServiceClient();
+    const cutoff = new Date(Date.now() - LIMITS.idle_conversation_minutes * 60 * 1000).toISOString();
 
-    const result = await closeIdleConversations(supabase);
+    const { data: idleConvs } = await db
+      .from('conversations')
+      .select('id, empresa_id')
+      .in('status', ['ai_active', 'waiting_human'])
+      .lt('last_message_at', cutoff);
 
-    console.log(`[CloseIdleConversations] Result: ${result.closed} closed, ${result.errors} errors`);
+    if (!idleConvs || idleConvs.length === 0) {
+      return new Response(JSON.stringify({ closed: 0 }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
-    return new Response(
-      JSON.stringify({ success: true, ...result }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    );
-  } catch (e) {
-    console.error('[CloseIdleConversations] Error:', e);
-    return new Response(
-      JSON.stringify({ success: false, error: String(e) }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    );
+    const ids = idleConvs.map(c => c.id);
+
+    await db.from('conversations')
+      .update({
+        status: 'closed',
+        closed_at: new Date().toISOString(),
+        closure_reason: 'idle_timeout',
+      })
+      .in('id', ids);
+
+    console.log(`[CLOSE_IDLE] Closed ${ids.length} idle conversations`);
+
+    return new Response(JSON.stringify({ closed: ids.length }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+
+  } catch (error) {
+    console.error('[CLOSE_IDLE_ERROR]', error);
+    return new Response(JSON.stringify({ error: 'Internal error' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 });
