@@ -1,7 +1,6 @@
 import { ConversationContext, SlotSuggestion } from './types.ts';
-import { getMissingFields, getNextFieldToAsk } from './entity-extractor.ts';
+import { getMissingFields } from './entity-extractor.ts';
 import { checkAvailability, findNextAvailableDays } from './availability-engine.ts';
-import { canTransition } from './state-machine.ts';
 import { LIMITS } from './constants.ts';
 
 interface OrchestratorResult {
@@ -11,42 +10,82 @@ interface OrchestratorResult {
   slots?: SlotSuggestion[];
 }
 
-const FIELD_QUESTIONS: Record<string, string> = {
-  service_id: 'Qual é o serviço que pretende agendar?',
-  customer_name: 'Qual é o seu nome completo?',
-  customer_email: 'Qual é o seu endereço de email?',
-  customer_phone: 'Qual é o seu número de telefone?',
-  preferred_date: 'Para que data pretende agendar?',
-  customer_reason: 'Qual é o motivo da sua visita?',
-};
+// Groups personal fields together for natural collection
+function getPersonalFieldsGroup(missing: string[]): string[] {
+  const personal = ['customer_name', 'customer_email', 'customer_phone'];
+  return personal.filter(f => missing.includes(f));
+}
 
 export async function orchestrateBooking(
   context: ConversationContext,
   empresaId: string,
   requirePhone: boolean = false,
-  requireReason: boolean = true
+  requireReason: boolean = false
 ): Promise<OrchestratorResult> {
 
   const missing = getMissingFields(context, requirePhone, requireReason);
 
-  // Still collecting data
   if (missing.length > 0) {
-    const nextField = getNextFieldToAsk(missing);
-    const question = FIELD_QUESTIONS[nextField ?? ''] ?? 'Preciso de mais informações.';
+    // Service not yet identified — ask first
+    if (missing.includes('service_id')) {
+      return {
+        context_updates: { state: 'collecting_data', fields_missing: missing },
+        action: 'ASK_SERVICE',
+        response_hint: 'Identifica o serviço que o utilizador pretende agendar e pergunta de forma natural qual o serviço.',
+      };
+    }
 
-    return {
-      context_updates: {
-        state: 'collecting_data',
-        fields_missing: missing,
-      },
-      action: 'ASK_FIELD',
-      response_hint: question,
-    };
+    // Group personal fields — ask all at once
+    const personalMissing = getPersonalFieldsGroup(missing);
+    if (personalMissing.length > 0) {
+      const needsName = personalMissing.includes('customer_name');
+      const needsEmail = personalMissing.includes('customer_email');
+      const needsPhone = personalMissing.includes('customer_phone');
+
+      let hint = 'Para confirmar o agendamento, preciso de alguns dados. ';
+      const parts: string[] = [];
+      if (needsName) parts.push('nome completo');
+      if (needsEmail) parts.push('email');
+      if (needsPhone) parts.push('número de telefone');
+      hint += `Por favor indica o teu ${parts.join(', ')} 😊`;
+
+      return {
+        context_updates: { state: 'collecting_data', fields_missing: missing },
+        action: 'ASK_PERSONAL_DATA',
+        response_hint: hint,
+      };
+    }
+
+    // Only date missing — proactively suggest next available slots
+    if (missing.includes('preferred_date') && context.service_id) {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Lisbon' });
+      const nextDays = await findNextAvailableDays(empresaId, context.service_id, today, 'Europe/Lisbon', 2);
+      const proactiveSlots = nextDays.flatMap(d => d.slots.slice(0, 2)).slice(0, 4);
+
+      if (proactiveSlots.length > 0) {
+        return {
+          context_updates: {
+            state: 'awaiting_slot_selection',
+            available_slots: proactiveSlots,
+            slots_generated_for_date: null,
+            fields_missing: missing.filter(f => f !== 'preferred_date'),
+          },
+          action: 'PROACTIVE_SLOTS',
+          response_hint: 'O utilizador não indicou data. Sugere os próximos horários disponíveis de forma proactiva e simpática.',
+          slots: proactiveSlots,
+        };
+      }
+
+      return {
+        context_updates: { state: 'collecting_data', fields_missing: missing },
+        action: 'ASK_DATE',
+        response_hint: 'Pergunta de forma natural para que data e hora pretende o agendamento.',
+      };
+    }
   }
 
   // All data collected — check availability
   if (context.preferred_date && context.service_id) {
-    // If we already have slots for this date, don't re-check
     if (
       context.available_slots.length > 0 &&
       context.slots_generated_for_date === context.preferred_date
@@ -54,12 +93,11 @@ export async function orchestrateBooking(
       return {
         context_updates: { state: 'awaiting_slot_selection' },
         action: 'SHOW_EXISTING_SLOTS',
-        response_hint: 'Estes são os horários disponíveis:',
+        response_hint: 'Estes são os horários disponíveis. Apresenta-os de forma simpática e pede ao utilizador para escolher.',
         slots: context.available_slots,
       };
     }
 
-    // Check availability
     const availability = await checkAvailability({
       empresa_id: empresaId,
       service_id: context.service_id,
@@ -71,7 +109,6 @@ export async function orchestrateBooking(
       const slots = availability.slots.slice(0, LIMITS.max_slots_per_page);
 
       if (slots.length === 1) {
-        // Only one slot — go straight to confirmation
         return {
           context_updates: {
             state: 'awaiting_confirmation',
@@ -80,7 +117,7 @@ export async function orchestrateBooking(
             slots_generated_for_date: context.preferred_date,
           },
           action: 'SINGLE_SLOT_CONFIRM',
-          response_hint: `Apenas temos disponibilidade às ${slots[0].display_label}. Confirma este horário?`,
+          response_hint: `Só temos um horário disponível: ${slots[0].display_label}. Pergunta de forma natural se confirma.`,
           slots,
         };
       }
@@ -93,12 +130,11 @@ export async function orchestrateBooking(
           selected_slot: null,
         },
         action: 'SHOW_SLOTS',
-        response_hint: 'Estes são os horários disponíveis para essa data:',
+        response_hint: 'Apresenta os horários disponíveis de forma simpática. Diz que são os horários disponíveis para essa data e pede para escolher.',
         slots,
       };
     }
 
-    // No availability — find next available days
     const tomorrow = new Date(context.preferred_date + 'T12:00:00');
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toLocaleDateString('en-CA', { timeZone: 'Europe/Lisbon' });
@@ -122,7 +158,7 @@ export async function orchestrateBooking(
         preferred_date: null,
       },
       action: 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES',
-      response_hint: `Não há disponibilidade para ${context.preferred_date}. Aqui estão as próximas datas disponíveis:`,
+      response_hint: `Informa de forma empática que não há disponibilidade para a data pedida. Apresenta as próximas datas disponíveis e pede para escolher.`,
       slots: alternativeSlots,
     };
   }
@@ -130,7 +166,7 @@ export async function orchestrateBooking(
   return {
     context_updates: { state: 'collecting_data' },
     action: 'MISSING_DATE_OR_SERVICE',
-    response_hint: FIELD_QUESTIONS['preferred_date'],
+    response_hint: 'Pergunta de forma natural para que data pretende o agendamento.',
   };
 }
 
@@ -143,14 +179,12 @@ export function selectSlotFromContext(
 
   const lower = input.toLowerCase().trim();
 
-  // By number (1, 2, 3...)
   const numMatch = lower.match(/\b([1-9])\b/);
   if (numMatch) {
     const idx = parseInt(numMatch[1]) - 1;
     if (idx >= 0 && idx < slots.length) return slots[idx];
   }
 
-  // By ordinal (primeiro, segundo...)
   const ordinals: Record<string, number> = {
     'primeiro': 0, 'primeira': 0, 'segundo': 1, 'segunda': 1,
     'terceiro': 2, 'terceira': 2, 'quarto': 3, 'quarta': 3, 'quinto': 4,
@@ -159,13 +193,10 @@ export function selectSlotFromContext(
     if (lower.includes(word) && idx < slots.length) return slots[idx];
   }
 
-  // By time match (e.g. "10h", "10:00")
-  const timeMatch = lower.match(/\b(\d{1,2})(?:h|:)(\d{2})?\b/);
+  const timeMatch = lower.match(/\b(\d{1,2})(?:h|:00?)?\b/);
   if (timeMatch) {
     const hour = timeMatch[1].padStart(2, '0');
-    const min = timeMatch[2] ?? '00';
-    const timeStr = `${hour}:${min}`;
-    const found = slots.find(s => s.display_label.includes(timeStr));
+    const found = slots.find(s => s.display_label.includes(`${hour}:`));
     if (found) return found;
   }
 

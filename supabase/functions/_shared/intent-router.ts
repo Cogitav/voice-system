@@ -7,6 +7,13 @@ interface IntentResult {
   method: 'deterministic' | 'llm';
 }
 
+const AVAILABILITY_KEYWORDS = [
+  'próximo horário', 'proximo horario', 'próxima disponibilidade', 'quando têm', 'quando tem',
+  'que horários', 'que horarios', 'horários disponíveis', 'horarios disponiveis',
+  'quando posso', 'quando é possível', 'quando e possivel', 'há disponibilidade',
+  'ha disponibilidade', 'tem vaga', 'tem disponibilidade', 'primeira disponibilidade',
+];
+
 const BOOKING_KEYWORDS = [
   'marcar', 'agendar', 'reservar', 'marcação', 'agendamento', 'reserva',
   'quero marcar', 'quero agendar', 'preciso marcar', 'gostava de marcar',
@@ -58,6 +65,10 @@ function detectDeterministic(message: string, context: ConversationContext): Int
 
   for (const kw of HUMAN_KEYWORDS) {
     if (lower.includes(kw)) return { intent: 'HUMAN_REQUEST', confidence: 0.95, method: 'deterministic' };
+  }
+
+  for (const kw of AVAILABILITY_KEYWORDS) {
+    if (lower.includes(kw)) return { intent: 'BOOKING_NEW', confidence: 0.9, method: 'deterministic' };
   }
 
   for (const kw of BOOKING_KEYWORDS) {

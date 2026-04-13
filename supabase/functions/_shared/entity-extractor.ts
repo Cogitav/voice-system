@@ -79,7 +79,7 @@ Regras:
     const parsed = JSON.parse(response.replace(/```json|```/g, '').trim());
 
     const llmResult: Partial<ExtractedEntities> = {};
-    if (parsed.customer_name && parsed.customer_name !== 'null' && parsed.customer_name.includes(' ')) {
+    if (parsed.customer_name && parsed.customer_name !== 'null' && parsed.customer_name.length >= 2) {
       llmResult.customer_name = sanitizeText(parsed.customer_name);
     }
     if (parsed.customer_reason && parsed.customer_reason !== 'null') {

@@ -73,7 +73,7 @@ serve(async (req) => {
 
     const { data: agent } = await db
       .from('agentes')
-      .select('id, nome, prompt_base, regras, welcome_message, response_delay_ms')
+      .select('id, nome, prompt_base, regras, welcome_message, response_delay_ms, response_style')
       .eq('empresa_id', empresaId)
       .eq('is_default_chat_agent', true)
       .eq('status', 'ativo')
@@ -118,8 +118,8 @@ serve(async (req) => {
       });
     }
 
-    // Auto handoff if too many errors
-    if (shouldAutoHandoff(context)) {
+    // Auto handoff only if truly stuck — not just missing data
+    if (shouldAutoHandoff(context) && context.state !== 'collecting_data') {
       await triggerHandoff(conversationId, empresaId, context, 'Auto handoff: consecutive errors');
       const reply = getFallbackResponse('human_handoff', '');
       await db.from('messages').insert({ conversation_id: conversationId, sender_type: 'ai', content: reply });
@@ -159,7 +159,7 @@ serve(async (req) => {
     let reply = '';
 
     // ROUTING
-    if (intent === 'INFO_REQUEST' || (context.state === 'idle' && intent === 'OTHER')) {
+    if (intent === 'INFO_REQUEST') {
       // Knowledge base lookup
       const knowledge = await answerFromKnowledge(userMessage, empresaId, agentId, agentPrompt);
       if (knowledge.found && knowledge.answer) {
@@ -169,11 +169,35 @@ serve(async (req) => {
         reply = await generateResponse(userMessage, updatedContext, 'Responde à questão do utilizador com base no contexto da empresa.', null, {
           agent_name: agent?.nome ?? 'Assistente',
           agent_prompt: agentPrompt,
+          agent_style: agent?.response_style ?? 'friendly',
           empresa_name: empresa?.nome ?? '',
           language: 'pt-PT',
         }, empresaId);
       }
       updatedContext = await updateContext(conversationId, { state: 'idle' }, updatedContext.context_version);
+
+    } else if (context.state === 'idle' && intent === 'OTHER') {
+      // First message — unknown intent — treat as potential booking start
+      // Empathise and guide toward booking
+      updatedContext = await updateContext(conversationId, {
+        state: 'collecting_data',
+        current_intent: 'BOOKING_NEW',
+      }, updatedContext.context_version);
+      const orchestration = await orchestrateBooking(updatedContext, empresaId);
+      updatedContext = await updateContext(conversationId, {
+        ...orchestration.context_updates,
+        current_intent: 'BOOKING_NEW',
+      }, updatedContext.context_version);
+      reply = await generateResponse(userMessage, updatedContext,
+        'O utilizador entrou em contacto mas a intenção não é clara. Sê empático, responde ao que disse, e guia naturalmente para perceber como podes ajudar — o objetivo é o agendamento.',
+        orchestration.slots ?? null, {
+          agent_name: agent?.nome ?? 'Assistente',
+          agent_prompt: agentPrompt,
+          agent_style: agent?.response_style ?? 'friendly',
+          empresa_name: empresa?.nome ?? '',
+          empresa_sector: '',
+          language: 'pt-PT',
+        }, empresaId);
 
     } else if (intent === 'CANCEL') {
       reply = 'Para cancelar um agendamento, por favor indique o dia e hora do agendamento que pretende cancelar.';
@@ -253,6 +277,7 @@ serve(async (req) => {
           reply = await generateResponse(userMessage, updatedContext, orchestration.response_hint, orchestration.slots ?? null, {
             agent_name: agent?.nome ?? 'Assistente',
             agent_prompt: agentPrompt,
+            agent_style: agent?.response_style ?? 'friendly',
             empresa_name: empresa?.nome ?? '',
             language: 'pt-PT',
           }, empresaId);
@@ -265,11 +290,12 @@ serve(async (req) => {
             selected_slot: selectedSlot,
             state: 'awaiting_confirmation',
           }, updatedContext.context_version);
-          reply = buildConfirmationMessage(updatedContext);
+          reply = buildConfirmationMessage(updatedContext, agent?.response_style ?? 'friendly');
         } else {
           reply = await generateResponse(userMessage, updatedContext, 'O utilizador não selecionou um horário válido. Re-apresenta as opções disponíveis numeradas.', updatedContext.available_slots, {
             agent_name: agent?.nome ?? 'Assistente',
             agent_prompt: agentPrompt,
+            agent_style: agent?.response_style ?? 'friendly',
             empresa_name: empresa?.nome ?? '',
             language: 'pt-PT',
           }, empresaId);
@@ -288,10 +314,11 @@ serve(async (req) => {
           current_intent: 'BOOKING_NEW',
         }, updatedContext.context_version);
 
-        if (orchestration.action === 'SHOW_SLOTS' || orchestration.action === 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES' || orchestration.action === 'SINGLE_SLOT_CONFIRM') {
+        if (orchestration.action === 'SHOW_SLOTS' || orchestration.action === 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES' || orchestration.action === 'SINGLE_SLOT_CONFIRM' || orchestration.action === 'PROACTIVE_SLOTS') {
           reply = await generateResponse(userMessage, updatedContext, orchestration.response_hint, orchestration.slots ?? null, {
             agent_name: agent?.nome ?? 'Assistente',
             agent_prompt: agentPrompt,
+            agent_style: agent?.response_style ?? 'friendly',
             empresa_name: empresa?.nome ?? '',
             language: 'pt-PT',
           }, empresaId);
@@ -299,6 +326,7 @@ serve(async (req) => {
           reply = await generateResponse(userMessage, updatedContext, orchestration.response_hint, null, {
             agent_name: agent?.nome ?? 'Assistente',
             agent_prompt: agentPrompt,
+            agent_style: agent?.response_style ?? 'friendly',
             empresa_name: empresa?.nome ?? '',
             language: 'pt-PT',
           }, empresaId);
@@ -306,13 +334,26 @@ serve(async (req) => {
       }
 
     } else {
-      // Generic fallback
-      reply = await generateResponse(userMessage, updatedContext, 'Responde de forma útil e encaminha para o serviço correto.', null, {
-        agent_name: agent?.nome ?? 'Assistente',
-        agent_prompt: agentPrompt,
-        empresa_name: empresa?.nome ?? '',
-        language: 'pt-PT',
-      }, empresaId);
+      // Generic fallback — always try to move toward booking
+      updatedContext = await updateContext(conversationId, {
+        state: 'collecting_data',
+        current_intent: 'BOOKING_NEW',
+      }, updatedContext.context_version);
+      const orchestration = await orchestrateBooking(updatedContext, empresaId);
+      updatedContext = await updateContext(conversationId, {
+        ...orchestration.context_updates,
+        current_intent: 'BOOKING_NEW',
+      }, updatedContext.context_version);
+      reply = await generateResponse(userMessage, updatedContext,
+        orchestration.response_hint,
+        orchestration.slots ?? null, {
+          agent_name: agent?.nome ?? 'Assistente',
+          agent_prompt: agentPrompt,
+          agent_style: agent?.response_style ?? 'friendly',
+          empresa_name: empresa?.nome ?? '',
+          empresa_sector: '',
+          language: 'pt-PT',
+        }, empresaId);
     }
 
     // Save AI reply
