@@ -11,6 +11,7 @@ import { executeBooking } from '../_shared/booking-executor.ts';
 import { executeReschedule, resolveRescheduleSlot } from '../_shared/reschedule-handler.ts';
 import { answerFromKnowledge } from '../_shared/knowledge-retriever.ts';
 import { generateResponse, buildConfirmationMessage, getFallbackResponse } from '../_shared/response-generator.ts';
+import { buildResponseDirective, serializeDirectiveToPrompt, getHardcodedResponse, HARDCODED_TEMPLATES } from '../_shared/response-directive.ts';
 import { triggerHandoff, shouldAutoHandoff } from '../_shared/handoff-manager.ts';
 import { createLeadIfEligible } from '../_shared/lead-manager.ts';
 import { checkCredits, consumeCredits } from '../_shared/credit-manager.ts';
@@ -22,6 +23,35 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+async function generateWithDirective(
+  userMessage: string,
+  context: any,
+  mustSayType: string,
+  mustSayContent: string,
+  slots: any[] | null,
+  agentCtx: any,
+  emotionalCtx: any,
+  empresaId: string
+): Promise<string> {
+  const directive = buildResponseDirective({
+    state: context.state,
+    mustSayBlocks: [{ type: mustSayType as any, content: mustSayContent, priority: 1 }],
+    confirmedData: {
+      service_name: context.service_name,
+      customer_name: context.customer_name,
+      customer_email: context.customer_email,
+      customer_phone: context.customer_phone ?? null,
+      date: context.preferred_date ?? null,
+      time_start: null,
+      time_end: null,
+    },
+    emotionalContext: emotionalCtx,
+    language: 'pt-PT',
+  });
+  const directivePrompt = serializeDirectiveToPrompt(directive);
+  return generateResponse(userMessage, context, directivePrompt, slots, agentCtx, empresaId);
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -186,7 +216,7 @@ serve(async (req) => {
         reply = knowledge.answer;
         await consumeCredits(empresaId, 'knowledge_lookup');
       } else {
-        reply = await generateResponse(userMessage, updatedContext, 'Responde à questão do utilizador com base no contexto da empresa.', null, {
+        reply = await generateResponse(userMessage, updatedContext, serializeDirectiveToPrompt(buildResponseDirective({ state: updatedContext.state, mustSayBlocks: [{ type: 'inform', content: 'Responde à questão do utilizador com base no conhecimento da empresa. Sê directo e útil.', priority: 1 }], confirmedData: { service_name: updatedContext.service_name, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: updatedContext.preferred_date ?? null, time_start: null, time_end: null }, emotionalContext: emotionalContext as any, language: 'pt-PT' })), null, {
           agent_name: agent?.nome ?? 'Assistente',
           agent_prompt: agentPrompt,
           agent_style: agent?.response_style ?? 'friendly',
@@ -208,7 +238,7 @@ serve(async (req) => {
         current_intent: 'BOOKING_NEW',
       }, updatedContext.context_version);
       reply = await generateResponse(userMessage, updatedContext,
-        'O utilizador entrou em contacto mas a intenção não é clara. Sê empático, responde ao que disse, e guia naturalmente para perceber como podes ajudar — o objetivo é o agendamento.',
+        serializeDirectiveToPrompt(buildResponseDirective({ state: updatedContext.state, mustSayBlocks: [{ type: 'ask_service', content: 'Sê empático, reconhece o contexto e guia para perceber que serviço o utilizador pretende.', priority: 1 }], confirmedData: { service_name: null, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: null, time_start: null, time_end: null }, emotionalContext: emotionalContext as any, language: 'pt-PT' })),
         orchestration.slots ?? null, {
           agent_name: agent?.nome ?? 'Assistente',
           agent_prompt: agentPrompt,
@@ -242,7 +272,7 @@ serve(async (req) => {
       } else {
         // Service not yet resolved — ask empathetically
         reply = await generateResponse(userMessage, updatedContext,
-          'O utilizador entrou em contacto. Sê empático, reconhece o contexto emocional se presente, e guia naturalmente para perceber que serviço pretende. Não peças dados pessoais ainda.',
+          serializeDirectiveToPrompt(buildResponseDirective({ state: updatedContext.state, mustSayBlocks: [{ type: 'ask_service', content: 'Identifica o serviço pretendido. Não peças dados pessoais ainda.', priority: 1 }], confirmedData: { service_name: null, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: null, time_start: null, time_end: null }, emotionalContext: emotionalContext as any, language: 'pt-PT' })),
           null, {
             agent_name: agent?.nome ?? 'Assistente',
             agent_prompt: agentPrompt,
@@ -264,7 +294,7 @@ serve(async (req) => {
         current_intent: 'RESCHEDULE' as any,
       }, updatedContext.context_version);
       reply = await generateResponse(userMessage, updatedContext,
-        'O utilizador quer remarcar um agendamento. Pede a nova data e hora pretendida.',
+        serializeDirectiveToPrompt(buildResponseDirective({ state: updatedContext.state, mustSayBlocks: [{ type: 'ask_date', content: 'Pede a nova data e hora para o reagendamento.', priority: 1 }], confirmedData: { service_name: updatedContext.service_name, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: null, time_start: null, time_end: null }, emotionalContext: emotionalContext as any, language: 'pt-PT' })),
         null, {
           agent_name: agent?.nome ?? 'Assistente',
           agent_prompt: agentPrompt,
@@ -304,7 +334,16 @@ serve(async (req) => {
                 confirmed_snapshot: snapshot,
                 consecutive_errors: 0,
               }, updatedContext.context_version);
-              reply = `O seu agendamento foi confirmado! ✅\n\n${updatedContext.selected_slot?.display_label ?? ''}\nServiço: ${updatedContext.service_name}\n\nReceberá uma confirmação no email ${updatedContext.customer_email}.`;
+              const confirmedSnap = {
+                service_name: updatedContext.service_name,
+                customer_name: updatedContext.customer_name,
+                customer_email: updatedContext.customer_email,
+                customer_phone: updatedContext.customer_phone ?? null,
+                date: updatedContext.selected_slot?.start?.slice(0, 10) ?? null,
+                time_start: updatedContext.selected_slot?.display_label?.split('—')[1]?.trim()?.split(' ')[0] ?? null,
+                time_end: updatedContext.selected_slot?.display_label?.split('—')[1]?.trim()?.split(' às ')[1] ?? null,
+              };
+              reply = HARDCODED_TEMPLATES.booking_confirmed(confirmedSnap);
               await createLeadIfEligible(updatedContext, empresaId, agentId, conversationId);
             } else if (result.error_code === 'SLOT_CONFLICT') {
               updatedContext = await updateContext(conversationId, {
@@ -343,7 +382,16 @@ serve(async (req) => {
             selected_slot: selectedSlot,
             state: 'awaiting_confirmation',
           }, updatedContext.context_version);
-          reply = buildConfirmationMessage(updatedContext, agent?.response_style ?? 'friendly');
+          const confirmSnap = {
+            service_name: updatedContext.service_name,
+            customer_name: updatedContext.customer_name,
+            customer_email: updatedContext.customer_email,
+            customer_phone: updatedContext.customer_phone ?? null,
+            date: updatedContext.selected_slot?.start?.slice(0, 10) ?? null,
+            time_start: updatedContext.selected_slot?.display_label?.split('—')[1]?.trim()?.split(' ')[0] ?? null,
+            time_end: updatedContext.selected_slot?.display_label?.split('—')[1]?.trim()?.split(' às ')[1] ?? null,
+          };
+          reply = HARDCODED_TEMPLATES.awaiting_confirmation(confirmSnap);
         } else {
           reply = await generateResponse(userMessage, updatedContext, 'O utilizador não selecionou um horário válido. Re-apresenta as opções disponíveis numeradas.', updatedContext.available_slots, {
             agent_name: agent?.nome ?? 'Assistente',
