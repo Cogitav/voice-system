@@ -1,15 +1,13 @@
 export type ConversationState =
   | 'idle'
+  | 'collecting_service'
   | 'collecting_data'
+  | 'checking_availability'
   | 'awaiting_slot_selection'
   | 'awaiting_confirmation'
   | 'booking_processing'
   | 'completed'
-  | 'reschedule_pending'
-  | 'reschedule_confirm'
-  | 'cancel_pending'
-  | 'human_handoff'
-  | 'error';
+  | 'human_handoff';
 
 export type Intent =
   | 'BOOKING_NEW'
@@ -119,4 +117,195 @@ export interface LLMResponse {
   model: string;
   tokens_used: number;
   latency_ms: number;
+}
+
+// ─── Extraction Contract ────────────────────────────────────────────────────
+
+export type ExtractedIntent =
+  | 'BOOKING_NEW'
+  | 'RESCHEDULE'
+  | 'CANCEL'
+  | 'INFO_REQUEST'
+  | 'HUMAN_REQUEST'
+  | 'CONFIRMATION'
+  | 'SLOT_SELECTION'
+  | 'DATE_CHANGE'
+  | 'CORRECTION'
+  | 'EXPLICIT_RESTART'
+  | 'OFF_TOPIC'
+  | 'UNCLEAR';
+
+export interface EmotionalContext {
+  tone: 'neutral' | 'urgent' | 'frustrated' | 'anxious' | 'friendly';
+  keywords: string[];
+  detected_by: 'deterministic' | 'llm';
+}
+
+export interface SlotSelection {
+  method: 'by_number' | 'by_time' | 'by_date' | 'by_ordinal' | 'by_description';
+  value: string;
+}
+
+export type ConfirmationSignal =
+  | 'CONFIRM'
+  | 'DENY'
+  | 'CHANGE_DATE'
+  | 'CHANGE_TIME'
+  | 'CHANGE_SERVICE'
+  | 'CHANGE_DATA'
+  | 'QUESTION';
+
+export interface LLMExtraction {
+  customer_name: string | null;
+  customer_email: string | null;
+  customer_phone: string | null;
+  service_keywords: string[] | null;
+  service_id: string | null;
+  date_raw: string | null;
+  time_raw: string | null;
+  date_parsed: string | null;
+  time_parsed: string | null;
+  intent: ExtractedIntent;
+  emotional_context: EmotionalContext | null;
+  slot_selection: SlotSelection | null;
+  confirmation: ConfirmationSignal | null;
+  confidence: number;
+  raw_message: string;
+}
+
+// ─── Response Directive ─────────────────────────────────────────────────────
+
+export type MustSayType =
+  | 'ask_field'
+  | 'ask_multiple_fields'
+  | 'ask_service'
+  | 'ask_date'
+  | 'present_slots'
+  | 'ask_confirmation'
+  | 'confirm_booking'
+  | 'report_error'
+  | 'inform'
+  | 'redirect'
+  | 'suggest_services'
+  | 'no_availability'
+  | 'handoff_notice'
+  | 'clarify';
+
+export interface SlotPresentation {
+  slot_number: number;
+  date: string;
+  time_start: string;
+  time_end: string;
+  display: string;
+}
+
+export interface MustSayBlock {
+  type: MustSayType;
+  content: string | string[] | SlotPresentation[];
+  priority: number;
+}
+
+export interface ToneDirective {
+  base: 'professional' | 'friendly' | 'warm' | 'formal';
+  adapt_to_emotion: boolean;
+  max_emoji: number;
+  max_sentences: number;
+}
+
+export interface ConfirmedDataSnapshot {
+  service_name: string | null;
+  customer_name: string | null;
+  customer_email: string | null;
+  customer_phone: string | null;
+  date: string | null;
+  time_start: string | null;
+  time_end: string | null;
+}
+
+export interface ResponseDirective {
+  must_say: MustSayBlock[];
+  must_not: string[];
+  creative_freedom: 'none' | 'low' | 'medium' | 'high';
+  tone: ToneDirective;
+  emotional_context: EmotionalContext | null;
+  current_state: ConversationState;
+  confirmed_data: ConfirmedDataSnapshot;
+  language: string;
+}
+
+// ─── Error System ───────────────────────────────────────────────────────────
+
+export type ErrorCategory =
+  | 'validation_issue'
+  | 'user_correction'
+  | 'system_error';
+
+export type CorrectionType =
+  | 'change_date'
+  | 'change_time'
+  | 'change_service'
+  | 'change_personal_data'
+  | 'change_slot'
+  | 'restart_flow';
+
+export type SystemErrorType =
+  | 'availability_api_failure'
+  | 'database_error'
+  | 'booking_creation_failed'
+  | 'slot_conflict'
+  | 'service_unavailable'
+  | 'llm_failure'
+  | 'llm_invalid_response'
+  | 'unknown';
+
+export type RecoveryAction =
+  | 'retry_once'
+  | 'ask_new_date'
+  | 'suggest_alternatives'
+  | 'apologize_and_retry'
+  | 'handoff';
+
+export interface ValidationIssue {
+  category: 'validation_issue';
+  field: string;
+  raw_value: string;
+  error_reason: string;
+  attempt: number;
+  max_attempts: number;
+}
+
+export interface UserCorrection {
+  category: 'user_correction';
+  correction_type: CorrectionType;
+  fields_affected: string[];
+  preserve_fields: string[];
+}
+
+export interface SystemError {
+  category: 'system_error';
+  error_type: SystemErrorType;
+  recoverable: boolean;
+  recovery_action: RecoveryAction;
+}
+
+export interface FieldValidation {
+  field: string;
+  status: 'not_provided' | 'valid' | 'invalid';
+  raw_value: string | null;
+  error_reason: string | null;
+}
+
+export interface FieldAttemptTracker {
+  customer_email: number;
+  customer_phone: number;
+  customer_name: number;
+  preferred_date: number;
+}
+
+export interface ErrorState {
+  consecutive_errors: number;
+  field_attempts: FieldAttemptTracker;
+  frustration_consecutive: number;
+  last_error_type: SystemErrorType | null;
+  last_error_timestamp: string | null;
 }

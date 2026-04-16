@@ -1,6 +1,12 @@
+const SUSPICIOUS_TLDS = ['cococ', 'con', 'coom', 'comm', 'gmai', 'gmial'];
+
 export function isValidEmail(email: string): boolean {
-  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return regex.test(email.trim());
+  const trimmed = email.trim();
+  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if (!regex.test(trimmed)) return false;
+  const tld = trimmed.split('.').pop()!.toLowerCase();
+  if (SUSPICIOUS_TLDS.includes(tld)) return false;
+  return true;
 }
 
 export function isValidPhonePT(phone: string): boolean {
@@ -38,4 +44,15 @@ export function isValidTimeSlot(time: string): boolean {
 
 export function sanitizeText(text: string): string {
   return text.trim().replace(/\s+/g, ' ').slice(0, 500);
+}
+
+export function isValidName(name: string): boolean {
+  const trimmed = name.trim();
+  if (trimmed.length < 1 || trimmed.length > 100) return false;
+  return /[a-zA-ZÀ-ÿ]/.test(trimmed);
+}
+
+export function normalizeName(name: string): string {
+  const trimmed = name.trim().replace(/\s+/g, ' ');
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
