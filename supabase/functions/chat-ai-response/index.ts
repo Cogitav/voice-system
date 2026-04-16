@@ -1,8 +1,10 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { getContext, updateContext, createEmptyContext } from '../_shared/context-manager.ts';
-import { classifyIntent } from '../_shared/intent-router.ts';
-import { extractEntities, getMissingFields } from '../_shared/entity-extractor.ts';
+import { callLLMSimple } from '../_shared/llm-provider.ts';
+import { EXTRACTION_SYSTEM_PROMPT, parseExtractionResponse, validateExtraction, normalizeExtraction, isBelowConfidenceThreshold } from '../_shared/extraction-contract.ts';
+import { handleValidationIssue, handleSystemError, handleUserCorrection, handleFrustration, resetErrorCount } from '../_shared/error-handler.ts';
+import { EMOTION_KEYWORDS, ERROR_MESSAGES } from '../_shared/constants.ts';
 import { resolveService, loadServices } from '../_shared/service-resolver.ts';
 import { orchestrateBooking, selectSlotFromContext } from '../_shared/booking-orchestrator.ts';
 import { executeBooking } from '../_shared/booking-executor.ts';
@@ -103,48 +105,66 @@ serve(async (req) => {
       content: userMessage,
     });
 
-    // Classify intent
-    const intentResult = await classifyIntent(userMessage, context, empresaId);
-    const intent = intentResult.intent;
-
-    // Handle human handoff request immediately
-    if (intent === 'HUMAN_REQUEST') {
-      await triggerHandoff(conversationId, empresaId, context, 'User requested human');
-      const reply = 'Vou transferir para um operador humano agora. Um momento, por favor.';
-      await db.from('messages').insert({ conversation_id: conversationId, sender_type: 'ai', content: reply });
-      await consumeCredits(empresaId, 'message');
-      return new Response(JSON.stringify({ reply }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    // Single LLM call — extract intent, entities, emotion all at once
+    let extraction;
+    try {
+      const llmRaw = await callLLMSimple(EXTRACTION_SYSTEM_PROMPT, userMessage, empresaId, 'json');
+      extraction = parseExtractionResponse(llmRaw);
+    } catch {
+      extraction = parseExtractionResponse('');
     }
 
-    // Auto handoff only if truly stuck — not just missing data
-    if (shouldAutoHandoff(context) && context.state !== 'collecting_data') {
-      await triggerHandoff(conversationId, empresaId, context, 'Auto handoff: consecutive errors');
-      const reply = getFallbackResponse('human_handoff', '');
-      await db.from('messages').insert({ conversation_id: conversationId, sender_type: 'ai', content: reply });
-      await consumeCredits(empresaId, 'message');
-      return new Response(JSON.stringify({ reply }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    // Normalize valid fields
+    extraction = normalizeExtraction(extraction);
+
+    // Validate extracted fields
+    const fieldValidations = validateExtraction(extraction);
+
+    // Detect emotion deterministically first
+    let emotionalContext = null;
+    const lowerMsg = userMessage.toLowerCase();
+    for (const [tone, keywords] of Object.entries(EMOTION_KEYWORDS)) {
+      const found = (keywords as string[]).filter(kw => lowerMsg.includes(kw));
+      if (found.length > 0) {
+        emotionalContext = { tone, keywords: found, detected_by: 'deterministic' };
+        break;
+      }
+    }
+    // Use LLM emotional context as fallback if deterministic found nothing
+    if (!emotionalContext && extraction.emotional_context) {
+      emotionalContext = { ...extraction.emotional_context, detected_by: 'llm' };
     }
 
-    // Extract entities from message
-    const entities = await extractEntities(userMessage, context, empresaId, timezone);
+    // Map ExtractedIntent to routing intent
+    const intent = extraction.intent;
 
-    // Build context updates from extraction
+    // Build context updates from extraction (accumulate, never overwrite with null)
     const extractionUpdates: Partial<ConversationContext> = {
-      current_intent: intent,
+      current_intent: intent as any,
     };
-    if (entities.customer_name && !context.customer_name) extractionUpdates.customer_name = entities.customer_name;
-    if (entities.customer_email && !context.customer_email) extractionUpdates.customer_email = entities.customer_email;
-    if (entities.customer_phone && !context.customer_phone) extractionUpdates.customer_phone = entities.customer_phone;
-    if (entities.customer_reason && !context.customer_reason) extractionUpdates.customer_reason = entities.customer_reason;
-    if (entities.preferred_date) extractionUpdates.preferred_date = entities.preferred_date;
-    if (entities.preferred_time) extractionUpdates.preferred_time = entities.preferred_time;
+    if (extraction.customer_name) {
+      const nameValidation = fieldValidations.find(v => v.field === 'customer_name');
+      if (nameValidation?.status === 'valid' && !context.customer_name) {
+        extractionUpdates.customer_name = extraction.customer_name;
+      }
+    }
+    if (extraction.customer_email) {
+      const emailValidation = fieldValidations.find(v => v.field === 'customer_email');
+      if (emailValidation?.status === 'valid' && !context.customer_email) {
+        extractionUpdates.customer_email = extraction.customer_email;
+      }
+    }
+    if (extraction.customer_phone) {
+      const phoneValidation = fieldValidations.find(v => v.field === 'customer_phone');
+      if (phoneValidation?.status === 'valid' && !context.customer_phone) {
+        extractionUpdates.customer_phone = extraction.customer_phone;
+      }
+    }
+    if (extraction.date_parsed) extractionUpdates.preferred_date = extraction.date_parsed;
+    if (extraction.time_parsed) extractionUpdates.preferred_time = extraction.time_parsed;
 
     // Resolve service if not yet resolved
-    if (!context.service_id && intent !== 'INFO_REQUEST') {
+    if (!context.service_id && extraction.intent !== 'INFO_REQUEST') {
       const services = await loadServices(empresaId);
       const serviceResult = await resolveService(userMessage, empresaId, services);
       if (serviceResult.service_id) {
