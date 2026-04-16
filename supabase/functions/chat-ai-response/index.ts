@@ -196,11 +196,10 @@ serve(async (req) => {
       }
       updatedContext = await updateContext(conversationId, { state: 'idle' }, updatedContext.context_version);
 
-    } else if (context.state === 'idle' && intent === 'OTHER') {
-      // First message — unknown intent — treat as potential booking start
-      // Empathise and guide toward booking
+    } else if (context.state === 'idle' || intent === 'UNCLEAR' || (intent === 'BOOKING_NEW' && context.state === 'idle')) {
+      // First message or unclear intent — route to collecting_service first
       updatedContext = await updateContext(conversationId, {
-        state: 'collecting_data',
+        state: 'collecting_service',
         current_intent: 'BOOKING_NEW',
       }, updatedContext.context_version);
       const orchestration = await orchestrateBooking(updatedContext, empresaId);
@@ -219,29 +218,63 @@ serve(async (req) => {
           language: 'pt-PT',
         }, empresaId);
 
+    } else if (context.state === 'collecting_service') {
+      // Service resolution state — identify service before collecting personal data
+      if (updatedContext.service_id) {
+        // Service resolved — move to collecting data
+        updatedContext = await updateContext(conversationId, {
+          state: 'collecting_data',
+          current_intent: 'BOOKING_NEW',
+        }, updatedContext.context_version);
+        const orchestration = await orchestrateBooking(updatedContext, empresaId);
+        updatedContext = await updateContext(conversationId, {
+          ...orchestration.context_updates,
+          current_intent: 'BOOKING_NEW',
+        }, updatedContext.context_version);
+        reply = await generateResponse(userMessage, updatedContext, orchestration.response_hint, orchestration.slots ?? null, {
+          agent_name: agent?.nome ?? 'Assistente',
+          agent_prompt: agentPrompt,
+          agent_style: agent?.response_style ?? 'friendly',
+          empresa_name: empresa?.nome ?? '',
+          empresa_sector: '',
+          language: 'pt-PT',
+        }, empresaId);
+      } else {
+        // Service not yet resolved — ask empathetically
+        reply = await generateResponse(userMessage, updatedContext,
+          'O utilizador entrou em contacto. Sê empático, reconhece o contexto emocional se presente, e guia naturalmente para perceber que serviço pretende. Não peças dados pessoais ainda.',
+          null, {
+            agent_name: agent?.nome ?? 'Assistente',
+            agent_prompt: agentPrompt,
+            agent_style: agent?.response_style ?? 'friendly',
+            empresa_name: empresa?.nome ?? '',
+            empresa_sector: '',
+            language: 'pt-PT',
+          }, empresaId);
+      }
+
     } else if (intent === 'CANCEL') {
       reply = 'Para cancelar um agendamento, por favor indique o dia e hora do agendamento que pretende cancelar.';
       updatedContext = await updateContext(conversationId, { state: 'collecting_data', current_intent: 'CANCEL' }, updatedContext.context_version);
 
-    } else if (intent === 'RESCHEDULE' || context.state === 'reschedule_pending' || context.state === 'reschedule_confirm') {
-      // Reschedule flow
-      if (context.state === 'reschedule_confirm' && /\b(sim|confirmo|confirmar|ok|certo|yes)\b/i.test(userMessage)) {
-        const result = await executeReschedule(updatedContext, empresaId, agentId, conversationId);
-        if (result.success) {
-          reply = `O seu agendamento foi remarcado com sucesso! ${updatedContext.reschedule_new_slot?.display_label ?? ''}`;
-          updatedContext = await updateContext(conversationId, { state: 'completed', agendamento_id: result.agendamento_id }, updatedContext.context_version);
-          await createLeadIfEligible(updatedContext, empresaId, agentId, conversationId);
-        } else {
-          reply = result.error ?? 'Erro ao remarcar. Tente novamente.';
-          updatedContext = await updateContext(conversationId, { consecutive_errors: updatedContext.consecutive_errors + 1 }, updatedContext.context_version);
-        }
-      } else {
-        const rescheduleUpdates = resolveRescheduleSlot(updatedContext, entities.preferred_date ?? null, entities.preferred_time ?? null);
-        updatedContext = await updateContext(conversationId, { ...rescheduleUpdates, state: 'reschedule_pending', current_intent: 'RESCHEDULE' }, updatedContext.context_version);
-        reply = 'Para remarcar, indique a nova data e horário que pretende.';
-      }
+    } else if (intent === 'RESCHEDULE') {
+      // Reschedule — guide user to provide new date/time
+      updatedContext = await updateContext(conversationId, {
+        state: 'collecting_data',
+        current_intent: 'RESCHEDULE' as any,
+      }, updatedContext.context_version);
+      reply = await generateResponse(userMessage, updatedContext,
+        'O utilizador quer remarcar um agendamento. Pede a nova data e hora pretendida.',
+        null, {
+          agent_name: agent?.nome ?? 'Assistente',
+          agent_prompt: agentPrompt,
+          agent_style: agent?.response_style ?? 'friendly',
+          empresa_name: empresa?.nome ?? '',
+          empresa_sector: '',
+          language: 'pt-PT',
+        }, empresaId);
 
-    } else if (intent === 'BOOKING_NEW' || ['collecting_data', 'awaiting_slot_selection', 'awaiting_confirmation', 'booking_processing'].includes(context.state) || ['collecting_data', 'awaiting_slot_selection', 'awaiting_confirmation', 'booking_processing'].includes(updatedContext.state)) {
+    } else if (intent === 'BOOKING_NEW' || ['collecting_service', 'collecting_data', 'awaiting_slot_selection', 'awaiting_confirmation', 'booking_processing'].includes(context.state) || ['collecting_service', 'collecting_data', 'awaiting_slot_selection', 'awaiting_confirmation', 'booking_processing'].includes(updatedContext.state)) {
       // Booking flow
 
       if (updatedContext.state === 'awaiting_confirmation') {
@@ -356,7 +389,7 @@ serve(async (req) => {
     } else {
       // Generic fallback — always try to move toward booking
       updatedContext = await updateContext(conversationId, {
-        state: 'collecting_data',
+        state: context.service_id ? 'collecting_data' as const : 'collecting_service' as const,
         current_intent: 'BOOKING_NEW',
       }, updatedContext.context_version);
       const orchestration = await orchestrateBooking(updatedContext, empresaId);
