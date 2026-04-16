@@ -1,5 +1,6 @@
 import { getServiceClient } from './supabase-client.ts';
-import { ConversationContext, ConversationState } from './types.ts';
+import { ConversationContext, ConversationState, ErrorState, CorrectionType } from './types.ts';
+import { CONTEXT_RESET_RULES } from './constants.ts';
 
 export function createEmptyContext(): ConversationContext {
   return {
@@ -33,6 +34,18 @@ export function createEmptyContext(): ConversationContext {
     language: 'pt-PT',
     context_version: 1,
     updated_at: new Date().toISOString(),
+    error_context: {
+      consecutive_errors: 0,
+      field_attempts: {
+        customer_email: 0,
+        customer_phone: 0,
+        customer_name: 0,
+        preferred_date: 0,
+      },
+      frustration_consecutive: 0,
+      last_error_type: null,
+      last_error_timestamp: null,
+    },
   };
 }
 
@@ -105,4 +118,47 @@ export async function setConversationState(
   currentVersion: number
 ): Promise<ConversationContext> {
   return updateContext(conversationId, { state: newState }, currentVersion);
+}
+
+export function resetPartialContext(
+  context: ConversationContext,
+  correctionType: CorrectionType
+): ConversationContext {
+  const rules = CONTEXT_RESET_RULES[correctionType];
+  if (rules.clear.includes('ALL')) {
+    return {
+      ...createEmptyContext(),
+      language: context.language,
+      context_version: context.context_version,
+      updated_at: context.updated_at,
+    };
+  }
+  const updated = { ...context };
+  for (const field of rules.clear) {
+    (updated as any)[field] = null;
+  }
+  return updated;
+}
+
+export function accumulateField(
+  context: ConversationContext,
+  field: keyof ConversationContext,
+  value: unknown
+): ConversationContext {
+  if (value === null || value === undefined || value === '') return context;
+  const updated = { ...context, [field]: value };
+  const fieldStr = field as string;
+  if (!updated.fields_collected.includes(fieldStr)) {
+    updated.fields_collected = [...updated.fields_collected, fieldStr];
+  }
+  updated.fields_missing = updated.fields_missing.filter(f => f !== fieldStr);
+  return updated;
+}
+
+export function getGroupedMissingFields(context: ConversationContext): string[] {
+  const required = ['customer_name', 'customer_email', 'customer_phone', 'service_id', 'preferred_date'];
+  return required.filter(field => {
+    const value = (context as any)[field];
+    return value === null || value === undefined || value === '';
+  });
 }

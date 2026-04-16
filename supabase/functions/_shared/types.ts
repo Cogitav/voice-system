@@ -67,6 +67,7 @@ export interface ConversationContext {
   language: string;
   context_version: number;
   updated_at: string;
+  error_context: ErrorState;
 }
 
 export interface SchedulingService {
