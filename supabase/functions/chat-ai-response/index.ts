@@ -4,7 +4,7 @@ import { getContext, updateContext, createEmptyContext } from '../_shared/contex
 import { callLLMSimple } from '../_shared/llm-provider.ts';
 import { EXTRACTION_SYSTEM_PROMPT, parseExtractionResponse, validateExtraction, normalizeExtraction, isBelowConfidenceThreshold } from '../_shared/extraction-contract.ts';
 import { handleValidationIssue, handleSystemError, handleUserCorrection, handleFrustration, resetErrorCount } from '../_shared/error-handler.ts';
-import { EMOTION_KEYWORDS, ERROR_MESSAGES } from '../_shared/constants.ts';
+import { EMOTION_KEYWORDS, ERROR_MESSAGES, HANDOFF_RULES } from '../_shared/constants.ts';
 import { resolveService, loadServices } from '../_shared/service-resolver.ts';
 import { orchestrateBooking, selectSlotFromContext } from '../_shared/booking-orchestrator.ts';
 import { executeBooking } from '../_shared/booking-executor.ts';
@@ -206,6 +206,29 @@ serve(async (req) => {
     // Apply extraction updates
     let updatedContext = await updateContext(conversationId, extractionUpdates, currentVersion);
 
+    // Handle human handoff request immediately
+    if (intent === 'HUMAN_REQUEST') {
+      await triggerHandoff(conversationId, empresaId, updatedContext, 'User requested human');
+      const reply = 'Vou transferir para um operador humano agora. Um momento, por favor.';
+      await db.from('messages').insert({ conversation_id: conversationId, sender_type: 'ai', content: reply });
+      await consumeCredits(empresaId, 'message', conversationId);
+      return new Response(JSON.stringify({ reply }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Auto handoff if error threshold reached
+    const errorState = updatedContext.error_context;
+    if (errorState && errorState.consecutive_errors >= HANDOFF_RULES.system_error_threshold) {
+      await triggerHandoff(conversationId, empresaId, updatedContext, 'Auto handoff: system errors threshold');
+      const reply = 'Peço desculpa pelas dificuldades. Vou transferir para um operador humano que pode ajudar melhor.';
+      await db.from('messages').insert({ conversation_id: conversationId, sender_type: 'ai', content: reply });
+      await consumeCredits(empresaId, 'message', conversationId);
+      return new Response(JSON.stringify({ reply }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     let reply = '';
 
     // ROUTING
@@ -332,7 +355,7 @@ serve(async (req) => {
                 state: 'completed',
                 agendamento_id: result.agendamento_id,
                 confirmed_snapshot: snapshot,
-                consecutive_errors: 0,
+                error_context: resetErrorCount(updatedContext.error_context),
               }, updatedContext.context_version);
               const confirmedSnap = {
                 service_name: updatedContext.service_name,
@@ -346,19 +369,34 @@ serve(async (req) => {
               reply = HARDCODED_TEMPLATES.booking_confirmed(confirmedSnap);
               await createLeadIfEligible(updatedContext, empresaId, agentId, conversationId);
             } else if (result.error_code === 'SLOT_CONFLICT') {
+              const { updatedErrorState } = handleSystemError(
+                updatedContext.error_context,
+                'slot_conflict',
+                true
+              );
               updatedContext = await updateContext(conversationId, {
                 state: 'awaiting_slot_selection',
                 selected_slot: null,
                 available_slots: [],
-                consecutive_errors: updatedContext.consecutive_errors + 1,
+                error_context: updatedErrorState,
               }, updatedContext.context_version);
-              reply = 'Este horário já não está disponível. Vou mostrar outras opções.';
+              reply = ERROR_MESSAGES.system.slot_conflict;
             } else {
+              const { updatedErrorState, shouldHandoff } = handleSystemError(
+                updatedContext.error_context,
+                'booking_creation_failed',
+                false
+              );
               updatedContext = await updateContext(conversationId, {
-                consecutive_errors: updatedContext.consecutive_errors + 1,
+                error_context: updatedErrorState,
                 last_error: result.error,
               }, updatedContext.context_version);
-              reply = result.error ?? 'Erro ao criar agendamento. Tente novamente.';
+              if (shouldHandoff) {
+                await triggerHandoff(conversationId, empresaId, updatedContext, 'Booking creation failed repeatedly');
+                reply = ERROR_MESSAGES.system.general_failure;
+              } else {
+                reply = result.error ?? ERROR_MESSAGES.system.retry;
+              }
             }
           }
         } else {
