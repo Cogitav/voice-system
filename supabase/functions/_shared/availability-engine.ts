@@ -6,6 +6,8 @@ interface AvailabilityRequest {
   service_id: string;
   date: string;
   timezone: string;
+  allow_same_day?: boolean;
+  minimum_advance_minutes?: number;
 }
 
 interface AvailabilityResult {
@@ -130,8 +132,13 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
     const slotStart = cursor + bufferBefore;
     const slotEnd = slotStart + duration;
 
+    if (isToday && !(req.allow_same_day ?? true)) {
+      cursor += 30;
+      continue;
+    }
     if (isToday) {
-      const nowMinutes = now.getHours() * 60 + now.getMinutes() + 30;
+      const advanceBuffer = req.minimum_advance_minutes ?? 30;
+      const nowMinutes = now.getHours() * 60 + now.getMinutes() + advanceBuffer;
       if (slotStart <= nowMinutes) {
         cursor += 30;
         continue;
@@ -189,7 +196,9 @@ export async function findNextAvailableDays(
   serviceId: string,
   fromDate: string,
   timezone: string,
-  maxDays: number = 5
+  maxDays: number = 5,
+  allowSameDay: boolean = true,
+  minimumAdvanceMinutes: number = 0
 ): Promise<AvailabilityResult[]> {
   const results: AvailabilityResult[] = [];
   const start = new Date(fromDate + 'T12:00:00');
@@ -206,6 +215,8 @@ export async function findNextAvailableDays(
       service_id: serviceId,
       date: dateStr,
       timezone,
+      allow_same_day: allowSameDay,
+      minimum_advance_minutes: minimumAdvanceMinutes,
     });
 
     if (result.has_availability) {

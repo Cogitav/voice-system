@@ -16,66 +16,32 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Bot, Sparkles, AlertCircle, Zap, CheckCircle, XCircle } from 'lucide-react';
+import { Bot, Sparkles, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { useAiProviders, AI_PROVIDER_MODELS } from '@/hooks/useAiProviders';
+import { useAiProviders } from '@/hooks/useAiProviders';
 
-// Available AI models - now sourced from useAiProviders
+// Available AI models grouped by provider
 const AVAILABLE_MODELS = [
-  // Google models
-  { 
-    value: 'google/gemini-3-flash-preview', 
-    label: 'Gemini 3 Flash (Preview)', 
+  {
     provider: 'google',
-    description: 'Rápido e equilibrado - Recomendado',
-    isDefault: true,
+    label: 'Google',
+    models: [
+      { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', recommended: true },
+      { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', recommended: false },
+      { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', recommended: false },
+    ]
   },
-  { 
-    value: 'google/gemini-2.5-flash', 
-    label: 'Gemini 2.5 Flash', 
-    provider: 'google',
-    description: 'Boa qualidade, baixa latência',
-    isDefault: false,
-  },
-  { 
-    value: 'google/gemini-2.5-flash-lite', 
-    label: 'Gemini 2.5 Flash Lite', 
-    provider: 'google',
-    description: 'Mais económico, tarefas simples',
-    isDefault: false,
-  },
-  { 
-    value: 'google/gemini-2.5-pro', 
-    label: 'Gemini 2.5 Pro', 
-    provider: 'google',
-    description: 'Maior qualidade, mais lento',
-    isDefault: false,
-  },
-  // OpenAI models  
-  { 
-    value: 'openai/gpt-5-nano', 
-    label: 'GPT-5 Nano', 
+  {
     provider: 'openai',
-    description: 'Muito rápido, económico',
-    isDefault: false,
-  },
-  { 
-    value: 'openai/gpt-5-mini', 
-    label: 'GPT-5 Mini', 
-    provider: 'openai',
-    description: 'Bom equilíbrio custo/qualidade',
-    isDefault: false,
-  },
-  { 
-    value: 'openai/gpt-5', 
-    label: 'GPT-5', 
-    provider: 'openai',
-    description: 'Alta qualidade, mais caro',
-    isDefault: false,
-  },
+    label: 'OpenAI',
+    models: [
+      { value: 'gpt-4o-mini', label: 'GPT-4o Mini', recommended: true },
+      { value: 'gpt-4o', label: 'GPT-4o', recommended: false },
+    ]
+  }
 ];
 
-const DEFAULT_MODEL = 'google/gemini-3-flash-preview';
+const DEFAULT_MODEL = 'gemini-1.5-flash';
 
 interface ChatAISettingsProps {
   // deno-lint-ignore no-explicit-any
@@ -84,10 +50,10 @@ interface ChatAISettingsProps {
 
 export function ChatAISettings({ form }: ChatAISettingsProps) {
   const { data: providers, isLoading: providersLoading } = useAiProviders();
-  
+
   const isRealAIEnabled = form.watch('chat_ai_real_enabled');
   const selectedModel = form.watch('chat_ai_model');
-  const selectedModelInfo = AVAILABLE_MODELS.find(m => m.value === selectedModel);
+  const selectedModelInfo = AVAILABLE_MODELS.flatMap(g => g.models).find(m => m.value === selectedModel);
 
   // Determine provider status
   const getProviderStatus = (providerKey: string) => {
@@ -100,11 +66,11 @@ export function ChatAISettings({ form }: ChatAISettingsProps) {
     };
   };
 
-  const googleStatus = getProviderStatus('google');
+  const geminiStatus = getProviderStatus('gemini');
   const openaiStatus = getProviderStatus('openai');
 
   // Check if the selected model's provider is available
-  const selectedProviderKey = selectedModel?.startsWith('openai/') ? 'openai' : 'google';
+  const selectedProviderKey = selectedModel?.startsWith('gpt-') ? 'openai' : 'gemini';
   const selectedProviderStatus = getProviderStatus(selectedProviderKey);
   const isSelectedProviderReady = selectedProviderStatus.enabled && selectedProviderStatus.hasKey;
 
@@ -123,12 +89,12 @@ export function ChatAISettings({ form }: ChatAISettingsProps) {
       {/* Provider Status Overview */}
       <div className="flex gap-4 justify-center">
         <div className="flex items-center gap-2 text-sm">
-          {googleStatus.enabled && googleStatus.hasKey ? (
+          {geminiStatus.enabled && geminiStatus.hasKey ? (
             <CheckCircle className="h-4 w-4 text-primary" />
           ) : (
             <XCircle className="h-4 w-4 text-muted-foreground" />
           )}
-          <span className={googleStatus.enabled && googleStatus.hasKey ? 'text-foreground' : 'text-muted-foreground'}>
+          <span className={geminiStatus.enabled && geminiStatus.hasKey ? 'text-foreground' : 'text-muted-foreground'}>
             Google Gemini
           </span>
         </div>
@@ -181,13 +147,16 @@ export function ChatAISettings({ form }: ChatAISettingsProps) {
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Modelo de IA</FormLabel>
-                <Select 
+                <Select
                   onValueChange={(value) => {
                     field.onChange(value);
-                    // Auto-set provider based on model prefix
-                    const provider = value.startsWith('openai/') ? 'openai' : 'google';
-                    form.setValue('chat_ai_provider', provider);
-                  }} 
+                    // Auto-set provider based on model name
+                    if (value.startsWith('gpt-')) {
+                      form.setValue('chat_ai_provider', 'openai');
+                    } else if (value.startsWith('gemini-')) {
+                      form.setValue('chat_ai_provider', 'gemini');
+                    }
+                  }}
                   value={field.value || DEFAULT_MODEL}
                 >
                   <FormControl>
@@ -196,64 +165,43 @@ export function ChatAISettings({ form }: ChatAISettingsProps) {
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-2">
-                      Google
-                      {googleStatus.enabled && googleStatus.hasKey ? (
-                        <Badge variant="secondary" className="text-xs">
-                          Disponível
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs">
-                          Não configurado
-                        </Badge>
-                      )}
-                    </div>
-                    {AVAILABLE_MODELS.filter(m => m.provider === 'google').map((model) => (
-                      <SelectItem 
-                        key={model.value} 
-                        value={model.value}
-                        disabled={!googleStatus.enabled || !googleStatus.hasKey}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span>{model.label}</span>
-                          {model.isDefault && (
-                            <Badge variant="secondary" className="text-xs">
-                              Recomendado
-                            </Badge>
-                          )}
+                    {AVAILABLE_MODELS.map((group) => {
+                      const status = group.provider === 'openai' ? openaiStatus : geminiStatus;
+                      return (
+                        <div key={group.provider}>
+                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-2">
+                            {group.label}
+                            {status.enabled && status.hasKey ? (
+                              <Badge variant="secondary" className="text-xs">
+                                Disponível
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-xs">
+                                Não configurado
+                              </Badge>
+                            )}
+                          </div>
+                          {group.models.map((model) => (
+                            <SelectItem
+                              key={model.value}
+                              value={model.value}
+                              disabled={!status.enabled || !status.hasKey}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span>{model.label}</span>
+                                {model.recommended && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    Recomendado
+                                  </Badge>
+                                )}
+                              </div>
+                            </SelectItem>
+                          ))}
                         </div>
-                      </SelectItem>
-                    ))}
-                    
-                    <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground mt-2 flex items-center gap-2">
-                      OpenAI
-                      {openaiStatus.enabled && openaiStatus.hasKey ? (
-                        <Badge variant="secondary" className="text-xs">
-                          Disponível
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs">
-                          Não configurado
-                        </Badge>
-                      )}
-                    </div>
-                    {AVAILABLE_MODELS.filter(m => m.provider === 'openai').map((model) => (
-                      <SelectItem 
-                        key={model.value} 
-                        value={model.value}
-                        disabled={!openaiStatus.enabled || !openaiStatus.hasKey}
-                      >
-                        {model.label}
-                      </SelectItem>
-                    ))}
+                      );
+                    })}
                   </SelectContent>
                 </Select>
-                {selectedModelInfo && (
-                  <FormDescription className="flex items-center gap-2">
-                    <Zap className="h-3 w-3" />
-                    {selectedModelInfo.description}
-                  </FormDescription>
-                )}
                 <FormMessage />
               </FormItem>
             )}
@@ -264,8 +212,8 @@ export function ChatAISettings({ form }: ChatAISettingsProps) {
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                O fornecedor <strong>{selectedProviderKey === 'openai' ? 'OpenAI' : 'Google'}</strong> não está 
-                configurado. Vá a <strong>Configurações → Integrações → Fornecedores de IA</strong> para 
+                O fornecedor <strong>{selectedProviderKey === 'openai' ? 'OpenAI' : 'Google Gemini'}</strong> não está
+                configurado. Vá a <strong>Configurações → Integrações → Fornecedores de IA</strong> para
                 ativar e configurar a chave de API.
               </AlertDescription>
             </Alert>

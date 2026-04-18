@@ -111,6 +111,17 @@ serve(async (req) => {
       .eq('status', 'ativo')
       .single();
 
+    const { data: bookingConfig } = await db
+      .from('booking_configuration')
+      .select('require_name, require_email, require_phone, require_reason, allow_same_day_booking, allow_outside_business_hours, minimum_advance_minutes, fallback_service_id')
+      .eq('empresa_id', empresaId)
+      .maybeSingle();
+
+    const requirePhone = bookingConfig?.require_phone ?? false;
+    const requireReason = bookingConfig?.require_reason ?? false;
+    const allowSameDay = bookingConfig?.allow_same_day_booking ?? true;
+    const minimumAdvanceMinutes = bookingConfig?.minimum_advance_minutes ?? 0;
+
     const agentId = agent?.id ?? '';
     const agentPrompt = `${agent?.prompt_base ?? ''}\n${agent?.regras ?? ''}`.trim();
     const timezone = empresa?.fuso_horario ?? 'Europe/Lisbon';
@@ -255,7 +266,7 @@ serve(async (req) => {
         state: 'collecting_service',
         current_intent: 'BOOKING_NEW',
       }, updatedContext.context_version);
-      const orchestration = await orchestrateBooking(updatedContext, empresaId);
+      const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
       updatedContext = await updateContext(conversationId, {
         ...orchestration.context_updates,
         current_intent: 'BOOKING_NEW',
@@ -283,7 +294,7 @@ serve(async (req) => {
           const { findNextAvailableDays } = await import('../_shared/availability-engine.ts');
           const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
           const searchDate = hasDate ? updatedContext.preferred_date! : today;
-          const nextDays = await findNextAvailableDays(empresaId, updatedContext.service_id, searchDate, timezone, 3);
+          const nextDays = await findNextAvailableDays(empresaId, updatedContext.service_id, searchDate, timezone, 3, allowSameDay, minimumAdvanceMinutes);
           const proactiveSlots = nextDays.flatMap((d: any) => d.slots.slice(0, 2)).slice(0, 5);
 
           if (proactiveSlots.length > 0) {
@@ -332,7 +343,7 @@ serve(async (req) => {
             state: 'collecting_data',
             current_intent: 'BOOKING_NEW',
           }, updatedContext.context_version);
-          const orchestration = await orchestrateBooking(updatedContext, empresaId);
+          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
           updatedContext = await updateContext(conversationId, {
             ...orchestration.context_updates,
             current_intent: 'BOOKING_NEW',
@@ -456,7 +467,7 @@ serve(async (req) => {
         } else {
           // User changed something — go back to collecting
           updatedContext = await updateContext(conversationId, { state: 'collecting_data', selected_slot: null }, updatedContext.context_version);
-          const orchestration = await orchestrateBooking(updatedContext, empresaId);
+          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
           updatedContext = await updateContext(conversationId, orchestration.context_updates, updatedContext.context_version);
           reply = await generateResponse(userMessage, updatedContext, orchestration.response_hint, orchestration.slots ?? null, {
             agent_name: agent?.nome ?? 'Assistente',
@@ -508,13 +519,23 @@ serve(async (req) => {
             reply = HARDCODED_TEMPLATES.awaiting_confirmation(confirmSnap);
           }
         } else {
-          reply = await generateResponse(userMessage, updatedContext, 'O utilizador não selecionou um horário válido. Re-apresenta as opções disponíveis numeradas.', updatedContext.available_slots, {
-            agent_name: agent?.nome ?? 'Assistente',
-            agent_prompt: agentPrompt,
-            agent_style: agent?.response_style ?? 'friendly',
-            empresa_name: empresa?.nome ?? '',
-            language: 'pt-PT',
-          }, empresaId);
+          // Re-present existing slots — do NOT regenerate
+          reply = await generateResponse(userMessage, updatedContext,
+            serializeDirectiveToPrompt(buildResponseDirective({
+              state: updatedContext.state,
+              mustSayBlocks: [{ type: 'present_slots', content: updatedContext.available_slots.map((s: any, i: number) => ({ slot_number: i + 1, date: s.start?.slice(0, 10) ?? '', time_start: s.display_label?.split('—')[1]?.trim()?.split(' ')[0] ?? '', time_end: s.display_label?.split('—')[1]?.trim()?.split(' às ')[1] ?? '', display: s.display_label })), priority: 1 }, { type: 'clarify', content: 'O horário indicado não está na lista. Pede para escolher um dos horários numerados acima.', priority: 2 }],
+              confirmedData: { service_name: updatedContext.service_name, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: updatedContext.preferred_date ?? null, time_start: null, time_end: null },
+              emotionalContext: null,
+              language: 'pt-PT',
+            })),
+            updatedContext.available_slots, {
+              agent_name: agent?.nome ?? 'Assistente',
+              agent_prompt: agentPrompt,
+              agent_style: agent?.response_style ?? 'friendly',
+              empresa_name: empresa?.nome ?? '',
+              empresa_sector: '',
+              language: 'pt-PT',
+            }, empresaId);
         }
 
       } else {
@@ -524,7 +545,7 @@ serve(async (req) => {
           state: 'collecting_data' as const,
           current_intent: 'BOOKING_NEW' as const,
         };
-        const orchestration = await orchestrateBooking(preOrchestrationContext, empresaId);
+        const orchestration = await orchestrateBooking(preOrchestrationContext, empresaId, requirePhone, requireReason);
         updatedContext = await updateContext(conversationId, {
           ...orchestration.context_updates,
           current_intent: 'BOOKING_NEW',
@@ -555,7 +576,7 @@ serve(async (req) => {
         state: context.service_id ? 'collecting_data' as const : 'collecting_service' as const,
         current_intent: 'BOOKING_NEW',
       }, updatedContext.context_version);
-      const orchestration = await orchestrateBooking(updatedContext, empresaId);
+      const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
       updatedContext = await updateContext(conversationId, {
         ...orchestration.context_updates,
         current_intent: 'BOOKING_NEW',
