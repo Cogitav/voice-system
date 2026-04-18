@@ -473,7 +473,14 @@ export function useSecurePublicChat(empresaSlug: string | undefined) {
         if (result.greetingMessage) {
           queryClient.setQueryData(
             ['public-chat-messages', empresaSlug, result.conversationId],
-            [result.greetingMessage]
+            [{
+              id: `welcome-${result.conversationId}`,
+              conversation_id: result.conversationId,
+              sender_type: 'ai',
+              content: result.greetingMessage,
+              is_internal: false,
+              created_at: new Date().toISOString(),
+            }]
           );
         }
         // Invalidate to fetch fresh messages (for reopened conversations)

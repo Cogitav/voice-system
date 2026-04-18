@@ -97,17 +97,34 @@ serve(async (req) => {
         message: 'New conversation via public-chat widget',
       });
 
-      // Get welcome message
       const { data: agent } = await db
         .from('agentes')
         .select('welcome_message, initial_greeting')
         .eq('empresa_id', empresa.id)
         .eq('is_default_chat_agent', true)
+        .eq('status', 'ativo')
         .single();
 
-      const welcomeMessage = agent?.welcome_message ?? agent?.initial_greeting ?? 'Olá! Como posso ajudar?';
+      const { data: menuServices } = await db
+        .from('scheduling_services')
+        .select('id, name, description, priority')
+        .eq('empresa_id', empresa.id)
+        .eq('show_in_chat_menu', true)
+        .eq('status', 'active')
+        .eq('bookable', true)
+        .order('priority', { ascending: true })
+        .limit(8);
 
-      // Save welcome message
+      const baseMessage = agent?.welcome_message ?? agent?.initial_greeting ?? 'Olá! Como posso ajudar?';
+
+      let welcomeMessage = baseMessage;
+      if (menuServices && menuServices.length > 0) {
+        const serviceList = menuServices
+          .map((s, i) => `${i + 1}. ${s.name}${s.description ? ` — ${s.description}` : ''}`)
+          .join('\n');
+        welcomeMessage = `${baseMessage}\n\nComo posso ajudar? Escolha uma opção ou escreva a sua questão:\n\n${serviceList}`;
+      }
+
       await db.from('messages').insert({
         conversation_id: conv.id,
         sender_type: 'ai',
@@ -117,6 +134,7 @@ serve(async (req) => {
       return response({
         conversationId: conv.id,
         welcomeMessage,
+        greetingMessage: welcomeMessage,
       });
     }
 
