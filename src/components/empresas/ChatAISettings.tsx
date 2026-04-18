@@ -26,9 +26,10 @@ const AVAILABLE_MODELS = [
     provider: 'google',
     label: 'Google',
     models: [
-      { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', recommended: true },
-      { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', recommended: false },
+      { value: 'gemini-2.5-flash-preview-04-17', label: 'Gemini 2.5 Flash', recommended: true },
+      { value: 'gemini-2.5-pro-preview-03-25', label: 'Gemini 2.5 Pro', recommended: false },
       { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', recommended: false },
+      { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', recommended: false },
     ]
   },
   {
