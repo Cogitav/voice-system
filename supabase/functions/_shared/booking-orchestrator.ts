@@ -59,15 +59,15 @@ export async function orchestrateBooking(
     // Only date missing — proactively suggest next available slots
     if (missing.includes('preferred_date') && context.service_id) {
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Lisbon' });
-      const nextDays = await findNextAvailableDays(empresaId, context.service_id, today, 'Europe/Lisbon', 2);
-      const proactiveSlots = nextDays.flatMap(d => d.slots.slice(0, 2)).slice(0, 4);
+      const nextDays = await findNextAvailableDays(empresaId, context.service_id, today, 'Europe/Lisbon', 3);
+      const proactiveSlots = nextDays.flatMap(d => d.slots.slice(0, 6)).slice(0, 8);
 
       if (proactiveSlots.length > 0) {
         return {
           context_updates: {
             state: 'awaiting_slot_selection',
             available_slots: proactiveSlots,
-            slots_generated_for_date: null,
+            slots_generated_for_date: 'proactive',
             fields_missing: missing.filter(f => f !== 'preferred_date'),
           },
           action: 'PROACTIVE_SLOTS',
@@ -88,7 +88,8 @@ export async function orchestrateBooking(
   if (context.preferred_date && context.service_id) {
     if (
       context.available_slots.length > 0 &&
-      context.slots_generated_for_date === context.preferred_date
+      (context.slots_generated_for_date === context.preferred_date ||
+       context.slots_generated_for_date === 'proactive')
     ) {
       return {
         context_updates: { state: 'awaiting_slot_selection' },
@@ -103,10 +104,11 @@ export async function orchestrateBooking(
       service_id: context.service_id,
       date: context.preferred_date,
       timezone: 'Europe/Lisbon',
+      preferred_time: context.preferred_time ?? undefined,
     });
 
     if (availability.has_availability) {
-      const slots = availability.slots.slice(0, LIMITS.max_slots_per_page);
+      const slots = availability.slots.slice(0, 8);
 
       if (slots.length === 1) {
         return {
@@ -193,10 +195,32 @@ export function selectSlotFromContext(
     if (lower.includes(word) && idx < slots.length) return slots[idx];
   }
 
-  const timeMatch = lower.match(/\b(\d{1,2})(?:h|:00?)?\b/);
+  const numberWords: Record<string, number> = {
+    'um': 0, 'uma': 0, 'dois': 1, 'duas': 1, 'três': 2, 'tres': 2,
+    'quatro': 3, 'cinco': 4,
+  };
+  for (const [word, idx] of Object.entries(numberWords)) {
+    if (lower.includes(word) && idx < slots.length) return slots[idx];
+  }
+
+  const timeMatch = lower.match(/\b(\d{1,2})(?:h(\d{2})?|:(\d{2}))?\b/);
   if (timeMatch) {
     const hour = timeMatch[1].padStart(2, '0');
-    const found = slots.find(s => s.display_label.includes(`${hour}:`));
+    const min = timeMatch[2] ?? timeMatch[3] ?? '00';
+    const timeStr = `${hour}:${min}`;
+    // Try exact match first
+    let found = slots.find(s => s.display_label.includes(timeStr));
+    // If no exact match, try hour-only match
+    if (!found) {
+      found = slots.find(s => s.display_label.includes(`${hour}:`));
+    }
+    // If still no match, try matching against slot start time
+    if (!found) {
+      found = slots.find(s => {
+        const slotHour = new Date(s.start).toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit' }).slice(0, 2);
+        return slotHour === hour;
+      });
+    }
     if (found) return found;
   }
 

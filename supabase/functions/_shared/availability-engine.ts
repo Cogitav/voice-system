@@ -8,6 +8,7 @@ interface AvailabilityRequest {
   timezone: string;
   allow_same_day?: boolean;
   minimum_advance_minutes?: number;
+  preferred_time?: string;
 }
 
 interface AvailabilityResult {
@@ -52,7 +53,7 @@ function formatDisplayLabel(date: string, startTime: string, endTime: string): s
   const d = new Date(year, month - 1, day);
   const weekday = weekdays[d.getDay()];
   const monthName = months[month - 1];
-  return `${weekday}, ${day} de ${monthName} — ${startTime} às ${endTime}`;
+  return `${weekday}, ${day} de ${monthName} — ${startTime}`;
 }
 
 export async function checkAvailability(req: AvailabilityRequest): Promise<AvailabilityResult> {
@@ -188,7 +189,21 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
     cursor += 30;
   }
 
-  return { slots, has_availability: slots.length > 0, date_checked: req.date };
+  let sortedSlots = slots;
+  if (req.preferred_time) {
+    const prefHour = req.preferred_time.slice(0, 2);
+    const preferred = slots.filter(s => {
+      const slotHour = new Date(s.start).toLocaleTimeString('pt-PT', { timeZone: req.timezone, hour: '2-digit' }).slice(0, 2);
+      return slotHour === prefHour;
+    });
+    const others = slots.filter(s => {
+      const slotHour = new Date(s.start).toLocaleTimeString('pt-PT', { timeZone: req.timezone, hour: '2-digit' }).slice(0, 2);
+      return slotHour !== prefHour;
+    });
+    sortedSlots = [...preferred, ...others];
+  }
+
+  return { slots: sortedSlots, has_availability: sortedSlots.length > 0, date_checked: req.date };
 }
 
 export async function findNextAvailableDays(
