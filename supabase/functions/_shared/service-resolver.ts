@@ -24,22 +24,52 @@ export async function loadServices(empresaId: string): Promise<SchedulingService
 }
 
 function tryDeterministic(message: string, services: SchedulingService[]): ServiceResolveResult | null {
-  const lower = message.toLowerCase();
+  const normalize = (text: string) =>
+    text.toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w\s]/g, '')
+      .trim();
+
+  const input = normalize(message);
+  let best: ServiceResolveResult | null = null;
+  let bestScore = 0;
 
   for (const service of services) {
-    const nameLower = service.name.toLowerCase();
-    if (lower.includes(nameLower)) {
-      return { service_id: service.id, service_name: service.name, confidence: 0.95, method: 'deterministic' };
+    let score = 0;
+    const nameLower = normalize(service.name);
+    const descLower = normalize(service.description || '');
+
+    // Full name match
+    if (input.includes(nameLower)) score += 100;
+    else if (nameLower.includes(input)) score += 60;
+
+    // Individual name words match
+    const nameWords = nameLower.split(/\s+/).filter(w => w.length > 3);
+    for (const word of nameWords) {
+      if (input.includes(word)) score += 30;
     }
-    if (service.description) {
-      const words = service.description.toLowerCase().split(/\s+/).filter(w => w.length > 4);
-      const matches = words.filter(w => lower.includes(w));
-      if (matches.length >= 2) {
-        return { service_id: service.id, service_name: service.name, confidence: 0.8, method: 'deterministic' };
-      }
+
+    // Description words match
+    const descWords = descLower.split(/\s+/).filter(w => w.length > 4);
+    const descMatches = descWords.filter(w => input.includes(w));
+    score += descMatches.length * 20;
+
+    // Priority boost
+    score += (service.priority || 0) * 5;
+
+    if (score > bestScore && score >= 30) {
+      bestScore = score;
+      best = {
+        service_id: service.id,
+        service_name: service.name,
+        confidence: Math.min(0.95, score / 100),
+        method: 'deterministic',
+      };
     }
   }
-  return null;
+
+  return best;
 }
 
 export async function resolveService(
