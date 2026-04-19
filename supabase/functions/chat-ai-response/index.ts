@@ -149,7 +149,9 @@ serve(async (req) => {
     // Single LLM call — extract intent, entities, emotion all at once
     let extraction;
     try {
-      const llmRaw = await callLLMSimple(EXTRACTION_SYSTEM_PROMPT, userMessage, empresaId, 'json');
+      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+      const extractionUserMessage = `[TODAY IS ${todayStr}]\n\n${userMessage}`;
+      const llmRaw = await callLLMSimple(EXTRACTION_SYSTEM_PROMPT, extractionUserMessage, empresaId, 'json');
       extraction = parseExtractionResponse(llmRaw);
     } catch {
       extraction = parseExtractionResponse('');
@@ -201,21 +203,37 @@ serve(async (req) => {
         extractionUpdates.customer_phone = extraction.customer_phone;
       }
     }
-    if (extraction.date_parsed) extractionUpdates.preferred_date = extraction.date_parsed;
-    if (extraction.time_parsed) extractionUpdates.preferred_time = extraction.time_parsed;
-
-    // Resolve service if not yet resolved
-    if (!context.service_id && extraction.intent !== 'INFO_REQUEST') {
-      const services = await loadServices(empresaId);
-      const serviceResult = await resolveService(userMessage, empresaId, services);
-      if (serviceResult.service_id) {
-        extractionUpdates.service_id = serviceResult.service_id;
-        extractionUpdates.service_name = serviceResult.service_name;
+    if (extraction.date_parsed) {
+      const fieldValidation = fieldValidations.find(v => v.field === 'date_parsed');
+      if (fieldValidation?.status === 'valid') {
+        extractionUpdates.preferred_date = extraction.date_parsed;
+      } else if (fieldValidation?.status === 'invalid') {
+        // Date is in the past or invalid — don't store it, let system ask for new date
+        console.log('[DATE_REJECTED] Past or invalid date rejected:', extraction.date_parsed);
+      } else {
+        // Not validated — do basic check ourselves
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+        if (extraction.date_parsed >= today) {
+          extractionUpdates.preferred_date = extraction.date_parsed;
+        }
       }
     }
+    if (extraction.time_parsed) extractionUpdates.preferred_time = extraction.time_parsed;
 
     // Apply extraction updates
     let updatedContext = await updateContext(conversationId, extractionUpdates, currentVersion);
+
+    // Resolve service if not yet resolved (checked against updatedContext, not stale context)
+    if (!updatedContext.service_id && intent !== 'INFO_REQUEST') {
+      const services = await loadServices(empresaId);
+      const serviceResult = await resolveService(userMessage, empresaId, services);
+      if (serviceResult.service_id) {
+        updatedContext = await updateContext(conversationId, {
+          service_id: serviceResult.service_id,
+          service_name: serviceResult.service_name,
+        }, updatedContext.context_version);
+      }
+    }
 
     // Handle human handoff request immediately
     if (intent === 'HUMAN_REQUEST') {
@@ -260,7 +278,7 @@ serve(async (req) => {
       }
       updatedContext = await updateContext(conversationId, { state: 'idle' }, updatedContext.context_version);
 
-    } else if (context.state === 'idle' || intent === 'UNCLEAR' || (intent === 'BOOKING_NEW' && context.state === 'idle')) {
+    } else if (context.state === 'idle') {
       // First message or unclear intent — route to collecting_service first
       updatedContext = await updateContext(conversationId, {
         state: 'collecting_service',
@@ -286,81 +304,29 @@ serve(async (req) => {
       // Service resolution state — identify service before collecting personal data
       if (updatedContext.service_id) {
         // Service resolved — show availability first (EC3: no personal data required before slots)
-        const hasPersonalData = updatedContext.customer_name && updatedContext.customer_email;
-        const hasDate = updatedContext.preferred_date;
-
-        if (!hasPersonalData || !hasDate) {
-          // Fetch next available slots proactively — do not ask for personal data yet
-          const { findNextAvailableDays } = await import('../_shared/availability-engine.ts');
-          const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
-          const searchDate = hasDate ? updatedContext.preferred_date! : today;
-          const nextDays = await findNextAvailableDays(empresaId, updatedContext.service_id, searchDate, timezone, 3, allowSameDay, minimumAdvanceMinutes);
-          const proactiveSlots = nextDays.flatMap((d: any) => d.slots.slice(0, 2)).slice(0, 5);
-
-          if (proactiveSlots.length > 0) {
-            updatedContext = await updateContext(conversationId, {
-              state: 'awaiting_slot_selection',
-              current_intent: 'BOOKING_NEW',
-              available_slots: proactiveSlots,
-              slots_generated_for_date: hasDate ? updatedContext.preferred_date : null,
-            }, updatedContext.context_version);
-            reply = await generateResponse(userMessage, updatedContext,
-              serializeDirectiveToPrompt(buildResponseDirective({
-                state: updatedContext.state,
-                mustSayBlocks: [{ type: 'present_slots', content: proactiveSlots.map((s: any, i: number) => ({ slot_number: i + 1, date: s.start.slice(0, 10), time_start: s.display_label.split('—')[1]?.trim()?.split(' ')[0] ?? '', time_end: s.display_label.split('—')[1]?.trim()?.split(' às ')[1] ?? '', display: s.display_label })), priority: 1 }],
-                confirmedData: { service_name: updatedContext.service_name, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: updatedContext.preferred_date ?? null, time_start: null, time_end: null },
-                emotionalContext: emotionalContext as any,
-                language: 'pt-PT',
-              })),
-              proactiveSlots, {
-                agent_name: agent?.nome ?? 'Assistente',
-                agent_prompt: agentPrompt,
-                agent_style: agent?.response_style ?? 'friendly',
-                empresa_name: empresa?.nome ?? '',
-                empresa_sector: '',
-                language: 'pt-PT',
-              }, empresaId);
-          } else {
-            // No availability found — ask for date
-            updatedContext = await updateContext(conversationId, {
-              state: 'collecting_data',
-              current_intent: 'BOOKING_NEW',
-            }, updatedContext.context_version);
-            reply = await generateResponse(userMessage, updatedContext,
-              serializeDirectiveToPrompt(buildResponseDirective({ state: updatedContext.state, mustSayBlocks: [{ type: 'ask_date', content: 'Não encontrei disponibilidade imediata. Pergunta para que data pretende o agendamento.', priority: 1 }], confirmedData: { service_name: updatedContext.service_name, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: null, time_start: null, time_end: null }, emotionalContext: emotionalContext as any, language: 'pt-PT' })),
-              null, {
-                agent_name: agent?.nome ?? 'Assistente',
-                agent_prompt: agentPrompt,
-                agent_style: agent?.response_style ?? 'friendly',
-                empresa_name: empresa?.nome ?? '',
-                empresa_sector: '',
-                language: 'pt-PT',
-              }, empresaId);
-          }
-        } else {
-          // Has personal data and date — go straight to orchestration
-          updatedContext = await updateContext(conversationId, {
-            state: 'collecting_data',
-            current_intent: 'BOOKING_NEW',
-          }, updatedContext.context_version);
-          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
-          updatedContext = await updateContext(conversationId, {
-            ...orchestration.context_updates,
-            current_intent: 'BOOKING_NEW',
-          }, updatedContext.context_version);
-          reply = await generateResponse(userMessage, updatedContext, orchestration.response_hint, orchestration.slots ?? null, {
-            agent_name: agent?.nome ?? 'Assistente',
-            agent_prompt: agentPrompt,
-            agent_style: agent?.response_style ?? 'friendly',
-            empresa_name: empresa?.nome ?? '',
-            empresa_sector: '',
-            language: 'pt-PT',
-          }, empresaId);
-        }
+        // Always use orchestrateBooking as single source of truth for slots
+        const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
+        updatedContext = await updateContext(conversationId, {
+          ...orchestration.context_updates,
+          current_intent: 'BOOKING_NEW',
+        }, updatedContext.context_version);
+        reply = await generateResponse(userMessage, updatedContext, orchestration.response_hint, orchestration.slots ?? null, {
+          agent_name: agent?.nome ?? 'Assistente',
+          agent_prompt: agentPrompt,
+          agent_style: agent?.response_style ?? 'friendly',
+          empresa_name: empresa?.nome ?? '',
+          empresa_sector: '',
+          language: 'pt-PT',
+        }, empresaId);
       } else {
-        // Service not yet resolved — ask empathetically
+        // Service not yet resolved — but check if we have enough personal data to proceed
+        // If user just provided personal data, keep collecting_service and ask for service
+        const justProvidedData = updatedContext.customer_name || updatedContext.customer_email || updatedContext.customer_phone;
+        const hint = justProvidedData
+          ? `Já tens os dados pessoais do utilizador. Agradece e pergunta qual o serviço ou motivo da consulta de forma natural.`
+          : 'Identifica o serviço pretendido. Não peças dados pessoais ainda.';
         reply = await generateResponse(userMessage, updatedContext,
-          serializeDirectiveToPrompt(buildResponseDirective({ state: updatedContext.state, mustSayBlocks: [{ type: 'ask_service', content: 'Identifica o serviço pretendido. Não peças dados pessoais ainda.', priority: 1 }], confirmedData: { service_name: null, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: null, time_start: null, time_end: null }, emotionalContext: emotionalContext as any, language: 'pt-PT' })),
+          serializeDirectiveToPrompt(buildResponseDirective({ state: updatedContext.state, mustSayBlocks: [{ type: 'ask_service', content: hint, priority: 1 }], confirmedData: { service_name: null, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: null, time_start: null, time_end: null }, emotionalContext: emotionalContext as any, language: 'pt-PT' })),
           null, {
             agent_name: agent?.nome ?? 'Assistente',
             agent_prompt: agentPrompt,
@@ -402,7 +368,9 @@ serve(async (req) => {
           if (!creditBooking.allowed) {
             reply = 'Não foi possível criar o agendamento: créditos insuficientes.';
           } else {
-            updatedContext = await updateContext(conversationId, { state: 'booking_processing' }, updatedContext.context_version);
+            if (canTransition(updatedContext.state, 'booking_processing')) {
+              updatedContext = await updateContext(conversationId, { state: 'booking_processing' }, updatedContext.context_version);
+            }
             const result = await executeBooking(updatedContext, empresaId, agentId, conversationId);
             if (result.success) {
               const snapshot = {
@@ -416,12 +384,14 @@ serve(async (req) => {
                 customer_phone: updatedContext.customer_phone ?? null,
                 agendamento_id: result.agendamento_id,
               };
-              updatedContext = await updateContext(conversationId, {
-                state: 'completed',
-                agendamento_id: result.agendamento_id,
-                confirmed_snapshot: snapshot,
-                error_context: resetErrorCount(updatedContext.error_context),
-              }, updatedContext.context_version);
+              if (canTransition(updatedContext.state, 'completed')) {
+                updatedContext = await updateContext(conversationId, {
+                  state: 'completed',
+                  agendamento_id: result.agendamento_id,
+                  confirmed_snapshot: snapshot,
+                  error_context: resetErrorCount(updatedContext.error_context),
+                }, updatedContext.context_version);
+              }
               const confirmedSnap = {
                 service_name: updatedContext.service_name,
                 customer_name: updatedContext.customer_name,
@@ -465,17 +435,65 @@ serve(async (req) => {
             }
           }
         } else {
-          // User changed something — go back to collecting
-          updatedContext = await updateContext(conversationId, { state: 'collecting_data', selected_slot: null }, updatedContext.context_version);
-          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
-          updatedContext = await updateContext(conversationId, orchestration.context_updates, updatedContext.context_version);
-          reply = await generateResponse(userMessage, updatedContext, orchestration.response_hint, orchestration.slots ?? null, {
-            agent_name: agent?.nome ?? 'Assistente',
-            agent_prompt: agentPrompt,
-            agent_style: agent?.response_style ?? 'friendly',
-            empresa_name: empresa?.nome ?? '',
-            language: 'pt-PT',
-          }, empresaId);
+          // Check if user is requesting a different time (not confirming, not cancelling)
+          const timeOnlyPattern = /\b(\d{1,2})\s*h(?:oras?)?(?:\s*(\d{2}))?\b|^às?\s+(\d{1,2})/i;
+          const isTimeRequest = timeOnlyPattern.test(userMessage) && extraction.intent !== 'CANCEL';
+
+          if (isTimeRequest && updatedContext.available_slots.length > 0) {
+            // User wants a different time — try to match against existing slots
+            const selectedSlot = selectSlotFromContext(updatedContext, userMessage);
+            if (selectedSlot) {
+              // Found matching slot — update selected slot and stay in confirmation
+              updatedContext = await updateContext(conversationId, {
+                selected_slot: selectedSlot,
+                state: 'awaiting_confirmation',
+              }, updatedContext.context_version);
+              const confirmSnap = {
+                service_name: updatedContext.service_name,
+                customer_name: updatedContext.customer_name,
+                customer_email: updatedContext.customer_email,
+                customer_phone: updatedContext.customer_phone ?? null,
+                date: selectedSlot.start?.slice(0, 10) ?? null,
+                time_start: selectedSlot.display_label?.split('—')[1]?.trim()?.split(' ')[0] ?? null,
+                time_end: null,
+              };
+              reply = HARDCODED_TEMPLATES.awaiting_confirmation(confirmSnap);
+            } else {
+              // Time not available — inform and re-show slots
+              updatedContext = await updateContext(conversationId, { state: 'awaiting_slot_selection' }, updatedContext.context_version);
+              reply = await generateResponse(userMessage, updatedContext,
+                serializeDirectiveToPrompt(buildResponseDirective({
+                  state: updatedContext.state,
+                  mustSayBlocks: [
+                    { type: 'report_error', content: 'Esse horário não está disponível.', priority: 1 },
+                    { type: 'present_slots', content: updatedContext.available_slots.map((s: any, i: number) => ({ slot_number: i + 1, date: s.start?.slice(0, 10) ?? '', time_start: s.display_label?.split('—')[1]?.trim()?.split(' ')[0] ?? '', time_end: '', display: s.display_label })), priority: 2 }
+                  ],
+                  confirmedData: { service_name: updatedContext.service_name, customer_name: updatedContext.customer_name, customer_email: updatedContext.customer_email, customer_phone: updatedContext.customer_phone ?? null, date: updatedContext.preferred_date ?? null, time_start: null, time_end: null },
+                  emotionalContext: null,
+                  language: 'pt-PT',
+                })),
+                updatedContext.available_slots, {
+                  agent_name: agent?.nome ?? 'Assistente',
+                  agent_prompt: agentPrompt,
+                  agent_style: agent?.response_style ?? 'friendly',
+                  empresa_name: empresa?.nome ?? '',
+                  empresa_sector: '',
+                  language: 'pt-PT',
+                }, empresaId);
+            }
+          } else {
+            // User changed something else — go back to collecting
+            updatedContext = await updateContext(conversationId, { state: 'collecting_data', selected_slot: null }, updatedContext.context_version);
+            const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
+            updatedContext = await updateContext(conversationId, orchestration.context_updates, updatedContext.context_version);
+            reply = await generateResponse(userMessage, updatedContext, orchestration.response_hint, orchestration.slots ?? null, {
+              agent_name: agent?.nome ?? 'Assistente',
+              agent_prompt: agentPrompt,
+              agent_style: agent?.response_style ?? 'friendly',
+              empresa_name: empresa?.nome ?? '',
+              language: 'pt-PT',
+            }, empresaId);
+          }
         }
 
       } else if (updatedContext.state === 'awaiting_slot_selection') {
@@ -573,7 +591,7 @@ serve(async (req) => {
     } else {
       // Generic fallback — always try to move toward booking
       updatedContext = await updateContext(conversationId, {
-        state: context.service_id ? 'collecting_data' as const : 'collecting_service' as const,
+        state: updatedContext.service_id ? 'collecting_data' as const : 'collecting_service' as const,
         current_intent: 'BOOKING_NEW',
       }, updatedContext.context_version);
       const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
