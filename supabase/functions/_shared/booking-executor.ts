@@ -38,6 +38,7 @@ export async function executeBooking(
     service_id: context.service_id!,
     date: slot.start.slice(0, 10),
     timezone: 'Europe/Lisbon',
+    preferred_time: new Date(slot.start).toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit', minute: '2-digit' }),
   });
 
   const stillAvailable = recheck.slots.some(s => s.start === slot.start && s.end === slot.end);
