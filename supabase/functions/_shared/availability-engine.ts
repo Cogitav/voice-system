@@ -15,6 +15,7 @@ interface AvailabilityResult {
   slots: SlotSuggestion[];
   has_availability: boolean;
   date_checked: string;
+  preferred_time_unavailable?: boolean;
 }
 
 interface BusinessHours {
@@ -189,21 +190,27 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
     cursor += 30;
   }
 
-  let sortedSlots = slots;
+  // If user requested a specific time, check if it exists
   if (req.preferred_time) {
     const prefHour = req.preferred_time.slice(0, 2);
-    const preferred = slots.filter(s => {
-      const slotHour = new Date(s.start).toLocaleTimeString('pt-PT', { timeZone: req.timezone, hour: '2-digit' }).slice(0, 2);
-      return slotHour === prefHour;
-    });
-    const others = slots.filter(s => {
-      const slotHour = new Date(s.start).toLocaleTimeString('pt-PT', { timeZone: req.timezone, hour: '2-digit' }).slice(0, 2);
-      return slotHour !== prefHour;
-    });
-    sortedSlots = [...preferred, ...others];
+    const prefMin = req.preferred_time.slice(3, 5) ?? '00';
+    const prefTimeStr = `${prefHour}:${prefMin}`;
+
+    // Find exact match
+    const exactMatch = slots.find(s => s.display_label.includes(prefTimeStr));
+
+    if (exactMatch) {
+      // Requested time is available - return it as first option + 4 alternatives
+      const alternatives = slots.filter(s => !s.display_label.includes(prefTimeStr)).slice(0, 4);
+      return { slots: [exactMatch, ...alternatives], has_availability: true, date_checked: req.date };
+    } else {
+      // Requested time not available - return 5 alternatives
+      return { slots: slots.slice(0, 5), has_availability: slots.length > 0, date_checked: req.date, preferred_time_unavailable: true };
+    }
   }
 
-  return { slots: sortedSlots, has_availability: sortedSlots.length > 0, date_checked: req.date };
+  // No preferred time - return first 5 slots
+  return { slots: slots.slice(0, 5), has_availability: slots.length > 0, date_checked: req.date };
 }
 
 export async function findNextAvailableDays(
