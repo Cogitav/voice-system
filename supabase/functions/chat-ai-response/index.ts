@@ -223,15 +223,26 @@ serve(async (req) => {
     // Apply extraction updates
     let updatedContext = await updateContext(conversationId, extractionUpdates, currentVersion);
 
-    // Resolve service if not yet resolved (checked against updatedContext, not stale context)
+    // Resolve service if not yet resolved — combine message + customer_reason for better matching
     if (!updatedContext.service_id && intent !== 'INFO_REQUEST') {
       const services = await loadServices(empresaId);
-      const serviceResult = await resolveService(userMessage, empresaId, services);
+      // Combine current message with any reason already in context for better semantic matching
+      const combinedInput = [
+        userMessage,
+        updatedContext.customer_reason,
+        extraction.service_keywords?.join(' '),
+      ].filter(Boolean).join(' ').trim();
+      const serviceResult = await resolveService(combinedInput, empresaId, services);
       if (serviceResult.service_id) {
-        updatedContext = await updateContext(conversationId, {
+        const serviceUpdates: Partial<ConversationContext> = {
           service_id: serviceResult.service_id,
           service_name: serviceResult.service_name,
-        }, updatedContext.context_version);
+        };
+        // Also save the reason for future reference
+        if (!updatedContext.customer_reason && userMessage.length > 5) {
+          serviceUpdates.customer_reason = userMessage.trim();
+        }
+        updatedContext = await updateContext(conversationId, serviceUpdates, updatedContext.context_version);
       }
     }
 
