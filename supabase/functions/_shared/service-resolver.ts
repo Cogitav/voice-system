@@ -9,6 +9,8 @@ interface ServiceResolveResult {
   method: 'deterministic' | 'llm';
 }
 
+const AUTO_SELECT_CONFIDENCE_THRESHOLD = 0.8;
+
 export async function loadServices(empresaId: string): Promise<SchedulingService[]> {
   const db = getServiceClient();
   const { data, error } = await db
@@ -88,7 +90,18 @@ export async function resolveService(
   }
 
   const deterministic = tryDeterministic(message, available);
-  if (deterministic) return deterministic;
+  if (deterministic) {
+    if (deterministic.confidence >= AUTO_SELECT_CONFIDENCE_THRESHOLD) {
+      return deterministic;
+    }
+
+    return {
+      service_id: null,
+      service_name: null,
+      confidence: deterministic.confidence,
+      method: deterministic.method,
+    };
+  }
 
   try {
     const serviceList = available.map((s, i) => `${i + 1}. ${s.name}${s.description ? ': ' + s.description : ''}`).join('\n');
@@ -106,16 +119,28 @@ Regras:
 - NUNCA inventes um serviço que não está na lista
 - Responde APENAS com JSON válido`;
 
-    const response = await callLLMSimple(systemPrompt, message, empresaId, 'json');
-    const parsed = JSON.parse(response.replace(/```json|```/g, '').trim());
+    const promptForCall = systemPrompt.replace('>= 0.7', '>= 0.8');
 
-    if (parsed.service_index !== null && parsed.confidence >= 0.7) {
+    const response = await callLLMSimple(promptForCall, message, empresaId, 'json');
+    const parsed = JSON.parse(response.replace(/```json|```/g, '').trim());
+    const parsedConfidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
+
+    if (parsed.service_index !== null && parsedConfidence < AUTO_SELECT_CONFIDENCE_THRESHOLD) {
+      return {
+        service_id: null,
+        service_name: null,
+        confidence: parsedConfidence,
+        method: 'llm',
+      };
+    }
+
+    if (parsed.service_index !== null && parsedConfidence >= AUTO_SELECT_CONFIDENCE_THRESHOLD) {
       const idx = parseInt(parsed.service_index) - 1;
       if (idx >= 0 && idx < available.length) {
         return {
           service_id: available[idx].id,
           service_name: available[idx].name,
-          confidence: parsed.confidence,
+          confidence: parsedConfidence,
           method: 'llm',
         };
       }

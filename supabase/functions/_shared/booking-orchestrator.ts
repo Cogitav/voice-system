@@ -10,6 +10,11 @@ interface OrchestratorResult {
   slots?: SlotSuggestion[];
 }
 
+export interface SlotSelectionResult {
+  slot: SlotSuggestion | null;
+  selected_index: number | null;
+}
+
 // Groups personal fields together for natural collection
 function getPersonalFieldsGroup(missing: string[]): string[] {
   const personal = ['customer_name', 'customer_email', 'customer_phone'];
@@ -172,19 +177,25 @@ export async function orchestrateBooking(
   };
 }
 
-export function selectSlotFromContext(
+export function resolveSlotSelectionFromContext(
   context: ConversationContext,
   input: string
-): SlotSuggestion | null {
+): SlotSelectionResult {
   const slots = context.available_slots;
-  if (!slots || slots.length === 0) return null;
+  if (!slots || slots.length === 0) {
+    return { slot: null, selected_index: null };
+  }
 
   const lower = input.toLowerCase().trim();
 
-  const numMatch = lower.match(/\b([1-9])\b/);
+  const numMatch = lower.match(/\b(\d{1,2})\b/);
   if (numMatch) {
-    const idx = parseInt(numMatch[1]) - 1;
-    if (idx >= 0 && idx < slots.length) return slots[idx];
+    const selectedIndex = parseInt(numMatch[1], 10);
+    const idx = selectedIndex - 1;
+    if (idx >= 0 && idx < slots.length) {
+      return { slot: slots[idx], selected_index: selectedIndex };
+    }
+    return { slot: null, selected_index: null };
   }
 
   const ordinals: Record<string, number> = {
@@ -192,7 +203,9 @@ export function selectSlotFromContext(
     'terceiro': 2, 'terceira': 2, 'quarto': 3, 'quarta': 3, 'quinto': 4,
   };
   for (const [word, idx] of Object.entries(ordinals)) {
-    if (lower.includes(word) && idx < slots.length) return slots[idx];
+    if (lower.includes(word) && idx < slots.length) {
+      return { slot: slots[idx], selected_index: idx + 1 };
+    }
   }
 
   const numberWords: Record<string, number> = {
@@ -200,7 +213,9 @@ export function selectSlotFromContext(
     'quatro': 3, 'cinco': 4,
   };
   for (const [word, idx] of Object.entries(numberWords)) {
-    if (lower.includes(word) && idx < slots.length) return slots[idx];
+    if (lower.includes(word) && idx < slots.length) {
+      return { slot: slots[idx], selected_index: idx + 1 };
+    }
   }
 
   const timeMatch = lower.match(/\b(\d{1,2})(?:h(\d{2})?|:(\d{2}))?\b/);
@@ -221,8 +236,22 @@ export function selectSlotFromContext(
         return slotHour === hour;
       });
     }
-    if (found) return found;
+    if (found) {
+      const idx = slots.findIndex((slot) =>
+        slot.start === found?.start &&
+        slot.end === found?.end &&
+        slot.resource_id === found?.resource_id
+      );
+      return { slot: found, selected_index: idx >= 0 ? idx + 1 : null };
+    }
   }
 
-  return null;
+  return { slot: null, selected_index: null };
+}
+
+export function selectSlotFromContext(
+  context: ConversationContext,
+  input: string
+): SlotSuggestion | null {
+  return resolveSlotSelectionFromContext(context, input).slot;
 }
