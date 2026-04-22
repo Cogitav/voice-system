@@ -33,6 +33,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const ACTIVE_BOOKING_STATES = new Set([
+  'collecting_service',
+  'collecting_data',
+  'collecting_date',
+  'collecting_personal_data',
+  'awaiting_slot_selection',
+  'awaiting_confirmation',
+  'booking_processing',
+]);
+
 // =============================================================================
 // HELPERS (extract time parts from slot ISO strings — single source of truth)
 // =============================================================================
@@ -577,7 +587,7 @@ serve(async (req) => {
       });
     }
 
-    if (intent === 'HUMAN_REQUEST') {
+    if (intent === 'HUMAN_REQUEST' && !ACTIVE_BOOKING_STATES.has(updatedContext.state)) {
       await triggerHandoff(conversationId, empresaId, updatedContext, 'User requested human');
       const reply = 'Vou transferir para um operador humano agora. Um momento, por favor.';
       await db.from('messages').insert({ conversation_id: conversationId, sender_type: 'ai', content: reply });
@@ -604,6 +614,8 @@ serve(async (req) => {
     //    BUG FIX #4: collecting_service has ONE branch only
     // -------------------------------------------------------------------------
     let reply = '';
+    const isActiveBookingState = ACTIVE_BOOKING_STATES.has(updatedContext.state);
+    const allowLegacyIntentRouting = !isActiveBookingState;
 
     const processCreateBooking = async (source: 'decision' | 'legacy_confirmation') => {
       logFlow('[FLOW_BRANCH]', {
@@ -619,11 +631,54 @@ serve(async (req) => {
         return;
       }
 
-      if (canTransition(updatedContext.state, 'booking_processing')) {
-        updatedContext = await updateContext(conversationId, { state: 'booking_processing' }, updatedContext.context_version);
+      const stateBeforeBooking = updatedContext.state ?? null;
+      const executionId = updatedContext.execution_id ?? crypto.randomUUID();
+      const bookingContextUpdates: Partial<ConversationContext> = {};
+
+      if (!updatedContext.execution_id) {
+        bookingContextUpdates.execution_id = executionId;
       }
 
+      if (canTransition(updatedContext.state, 'booking_processing')) {
+        bookingContextUpdates.state = 'booking_processing';
+      }
+
+      if (Object.keys(bookingContextUpdates).length > 0) {
+        updatedContext = await updateContext(
+          conversationId,
+          bookingContextUpdates,
+          updatedContext.context_version
+        );
+      }
+
+      logFlow('[FLOW_DEBUG_BOOKING]', {
+        stage: 'before_execute',
+        source,
+        execution_id: updatedContext.execution_id ?? executionId,
+        selected_slot_start: updatedContext.selected_slot?.start ?? null,
+        selected_slot_end: updatedContext.selected_slot?.end ?? null,
+        selected_slot_resource_id: updatedContext.selected_slot?.resource_id ?? null,
+        state_before_booking: stateBeforeBooking,
+        agendamento_id: null,
+        result_success: null,
+        result_error_code: null,
+        result_error: null,
+      });
+
       const result = await executeBooking(updatedContext, empresaId, agentId, conversationId);
+      logFlow('[FLOW_DEBUG_BOOKING]', {
+        stage: 'after_execute',
+        source,
+        execution_id: updatedContext.execution_id ?? executionId,
+        selected_slot_start: updatedContext.selected_slot?.start ?? null,
+        selected_slot_end: updatedContext.selected_slot?.end ?? null,
+        selected_slot_resource_id: updatedContext.selected_slot?.resource_id ?? null,
+        state_before_booking: stateBeforeBooking,
+        agendamento_id: result.agendamento_id ?? null,
+        result_success: result.success,
+        result_error_code: result.error_code ?? null,
+        result_error: result.error ?? null,
+      });
       if (result.success) {
         const snapshot = {
           service_id: updatedContext.service_id!,
@@ -684,8 +739,9 @@ serve(async (req) => {
 
     // --- 9a. INFO_REQUEST → knowledge base, no state change ---
     if (
-      decision.action === 'ANSWER_INFO' ||
+      (decision.action === 'ANSWER_INFO' && !isActiveBookingState) ||
       (
+        allowLegacyIntentRouting &&
         intent === 'INFO_REQUEST' &&
         updatedContext.state !== 'awaiting_confirmation' &&
         updatedContext.state !== 'booking_processing' &&
@@ -726,7 +782,7 @@ serve(async (req) => {
       }
 
     // --- 9b. CANCEL ---
-    } else if (decision.action === 'START_CANCEL' || intent === 'CANCEL') {
+    } else if (decision.action === 'START_CANCEL' || (allowLegacyIntentRouting && intent === 'CANCEL')) {
       logFlow('[FLOW_BRANCH]', {
         conversation_id: conversationId,
         branch: 'START_CANCEL',
@@ -741,7 +797,7 @@ serve(async (req) => {
       }, updatedContext.context_version);
 
     // --- 9c. RESCHEDULE ---
-    } else if (decision.action === 'START_RESCHEDULE' || intent === 'RESCHEDULE') {
+    } else if (decision.action === 'START_RESCHEDULE' || (allowLegacyIntentRouting && intent === 'RESCHEDULE')) {
       logFlow('[FLOW_BRANCH]', {
         conversation_id: conversationId,
         branch: 'START_RESCHEDULE',
@@ -776,7 +832,7 @@ serve(async (req) => {
     // --- 9d. BOOKING FLOW (state-driven, ALL branches use updatedContext.state) ---
     } else if (
       intent === 'BOOKING_NEW' ||
-      ['collecting_service', 'collecting_data', 'awaiting_slot_selection', 'awaiting_confirmation', 'booking_processing'].includes(updatedContext.state)
+      isActiveBookingState
     ) {
 
       if (decision.action === 'ASK_SERVICE') {
@@ -1078,67 +1134,7 @@ serve(async (req) => {
             state: updatedContext.state ?? null,
           });
 
-          const creditBooking = await checkCredits(empresaId, 'booking_create');
-          if (!creditBooking.allowed) {
-            reply = 'Não foi possível criar o agendamento: créditos insuficientes.';
-          } else {
-            if (canTransition(updatedContext.state, 'booking_processing')) {
-              updatedContext = await updateContext(conversationId, { state: 'booking_processing' }, updatedContext.context_version);
-            }
-            const result = await executeBooking(updatedContext, empresaId, agentId, conversationId);
-            if (result.success) {
-              const snapshot = {
-                service_id: updatedContext.service_id!,
-                service_name: updatedContext.service_name!,
-                start: updatedContext.selected_slot!.start,
-                end: updatedContext.selected_slot!.end,
-                resource_id: updatedContext.selected_slot!.resource_id,
-                customer_name: updatedContext.customer_name!,
-                customer_email: updatedContext.customer_email!,
-                customer_phone: updatedContext.customer_phone ?? null,
-                agendamento_id: result.agendamento_id,
-              };
-              if (canTransition(updatedContext.state, 'completed')) {
-                updatedContext = await updateContext(conversationId, {
-                  state: 'completed',
-                  agendamento_id: result.agendamento_id,
-                  confirmed_snapshot: snapshot,
-                  error_context: resetErrorCount(updatedContext.error_context),
-                }, updatedContext.context_version);
-              }
-              reply = HARDCODED_TEMPLATES.booking_confirmed(buildConfirmedSnapshot(updatedContext));
-              await createLeadIfEligible(updatedContext, empresaId, agentId, conversationId);
-            } else if (result.error_code === 'SLOT_CONFLICT') {
-              const { updatedErrorState } = handleSystemError(
-                updatedContext.error_context,
-                'slot_conflict',
-                true,
-              );
-              updatedContext = await updateContext(conversationId, {
-                state: 'awaiting_slot_selection',
-                selected_slot: null,
-                available_slots: [],
-                error_context: updatedErrorState,
-              }, updatedContext.context_version);
-              reply = ERROR_MESSAGES.system.slot_conflict;
-            } else {
-              const { updatedErrorState, shouldHandoff } = handleSystemError(
-                updatedContext.error_context,
-                'booking_creation_failed',
-                false,
-              );
-              updatedContext = await updateContext(conversationId, {
-                error_context: updatedErrorState,
-                last_error: result.error,
-              }, updatedContext.context_version);
-              if (shouldHandoff) {
-                await triggerHandoff(conversationId, empresaId, updatedContext, 'Booking creation failed repeatedly');
-                reply = ERROR_MESSAGES.system.general_failure;
-              } else {
-                reply = result.error ?? ERROR_MESSAGES.system.retry;
-              }
-            }
-          }
+          await processCreateBooking('legacy_confirmation');
 
         } else {
           // ---- Not a confirmation: might be a time change, data change, or unclear ----
