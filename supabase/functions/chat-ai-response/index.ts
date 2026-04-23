@@ -226,6 +226,74 @@ function hasSoftServiceSignal(extraction: LLMExtraction): boolean {
     extraction.confidence >= 0.5;
 }
 
+function getNameTokens(value: string): string[] {
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((token) => token.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, ''))
+    .filter((token) => /^\p{L}{2,}$/u.test(token));
+}
+
+function hasExplicitNameSignal(userMessage: string): boolean {
+  const normalized = userMessage
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  return /\b(o meu nome e|meu nome e|chamo-me|chamo me|nome:|name is|my name is)\b/.test(normalized);
+}
+
+function hasPersonalDataSignal(extraction: LLMExtraction, userMessage: string): boolean {
+  return !!(
+    extraction.customer_email ||
+    extraction.customer_phone ||
+    /@/.test(userMessage) ||
+    /\b(?:\+?\d[\d\s().-]{7,}\d)\b/.test(userMessage)
+  );
+}
+
+function hasPlausibleNameStructure(name: string | null): boolean {
+  if (!name) return false;
+  if (/@|\d/.test(name)) return false;
+  const tokens = getNameTokens(name);
+  return tokens.length >= 2 && tokens.length <= 6;
+}
+
+function isWeakCustomerName(name: string | null): boolean {
+  if (!name) return true;
+  return !hasPlausibleNameStructure(name);
+}
+
+function shouldAcceptCustomerName(
+  context: ConversationContext,
+  extraction: LLMExtraction,
+  userMessage: string,
+  requirePhone: boolean
+): boolean {
+  if (!extraction.customer_name) return false;
+  if (!hasPlausibleNameStructure(extraction.customer_name)) return false;
+
+  const collectingPersonalData =
+    context.state === 'collecting_personal_data' ||
+    (
+      context.state === 'collecting_data' &&
+      (!context.customer_name || !context.customer_email || (requirePhone && !context.customer_phone))
+    );
+
+  const explicitName = hasExplicitNameSignal(userMessage);
+  const personalDataSignal = hasPersonalDataSignal(extraction, userMessage);
+  const serviceOrReasonTurn =
+    context.state === 'collecting_service' ||
+    (
+      hasSoftServiceSignal(extraction) &&
+      !explicitName &&
+      !personalDataSignal
+    );
+
+  if (serviceOrReasonTurn) return false;
+  return collectingPersonalData || explicitName || personalDataSignal;
+}
+
 function hasExplicitDateSignal(userMessage: string, extraction: LLMExtraction): boolean {
   if (extraction.intent === 'DATE_CHANGE') return true;
   if (typeof extraction.date_raw === 'string' && extraction.date_raw.trim().length > 0) return true;
@@ -429,7 +497,13 @@ serve(async (req) => {
 
     if (extraction.customer_name) {
       const v = fieldValidations.find((x) => x.field === 'customer_name');
-      if (v?.status === 'valid' && !context.customer_name) {
+      const canAcceptName = shouldAcceptCustomerName(context, extraction, userMessage, requirePhone);
+      const shouldReplaceWeakName =
+        !!context.customer_name &&
+        isWeakCustomerName(context.customer_name) &&
+        canAcceptName;
+
+      if (v?.status === 'valid' && (!context.customer_name || shouldReplaceWeakName) && canAcceptName) {
         extractionUpdates.customer_name = extraction.customer_name;
       }
     }

@@ -128,8 +128,17 @@ export async function executeBooking(
     .single();
 
   const startDate = new Date(slot.start);
-  const dataStr = startDate.toLocaleDateString('en-CA', { timeZone: 'Europe/Lisbon' });
-  const horaStr = startDate.toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit', minute: '2-digit' });
+  const dataStr = slot.start.slice(0, 10) || startDate.toLocaleDateString('en-CA', { timeZone: 'Europe/Lisbon' });
+  const horaStr = slotTime ? `${slotTime}:00` : startDate.toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit', minute: '2-digit' });
+
+  console.log('[FLOW_DEBUG_BOOKING_PERSISTENCE]', JSON.stringify({
+    selected_slot_start: slot.start,
+    selected_slot_end: slot.end,
+    persisted_start_datetime: slot.start,
+    persisted_end_datetime: slot.end,
+    persisted_hora: horaStr,
+    timezone_used: 'Europe/Lisbon',
+  }));
 
   // Upsert customer
   let customerId: string | null = null;

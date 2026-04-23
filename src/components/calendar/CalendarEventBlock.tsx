@@ -43,14 +43,14 @@ function getStatusBgFallback(estado: string) {
 
 export function CalendarEventBlock({ event, top, height, resourceColor, onClick }: CalendarEventBlockProps) {
   const horaEnd = (() => {
-    if (event.end_datetime) {
-      const d = new Date(event.end_datetime);
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    }
     if (event.duration_minutes) {
       const [h, m] = event.hora.split(':').map(Number);
       const totalMin = h * 60 + m + event.duration_minutes;
       return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
+    }
+    if (event.end_datetime) {
+      const d = new Date(event.end_datetime);
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     }
     return null;
   })();
