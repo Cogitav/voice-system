@@ -1,0 +1,2190 @@
+{
+  "generated_at_utc": "2026-04-23T18:53:07.456Z",
+  "project_root": "C:\\Users\\Tiago Gracio\\Desktop\\Voice-system-plus",
+  "supabase_project_id_from_config": "szlwbqvqdvgjmnczfoaq",
+  "linked_project_ref_from_temp": "szlwbqvqdvgjmnczfoaq",
+  "linked_project_metadata_from_temp": {
+    "ref": "szlwbqvqdvgjmnczfoaq",
+    "name": "Voice-prod",
+    "organization_id": "ybwtgsmjozmyguhzgknh",
+    "organization_slug": "ybwtgsmjozmyguhzgknh"
+  },
+  "deployment_target_mismatch": false,
+  "supabase_config_file": {
+    "relative_path": "supabase/config.toml",
+    "exists_locally": true,
+    "file_size": 874,
+    "last_modified_utc": "2026-04-23T18:07:57.970Z",
+    "sha256": "5eca20895659702d5a8aaad2000a7bf749a9a6a26277ab3f075174a0ec164c25",
+    "empty_file": false
+  },
+  "linked_project_ref_file": {
+    "relative_path": "supabase/.temp/project-ref",
+    "exists_locally": true,
+    "file_size": 20,
+    "last_modified_utc": "2026-04-22T11:12:20.227Z",
+    "sha256": "e4977447c3de8be829d19d87a204f67832366696157bd4f8be27a5662d875794",
+    "empty_file": false
+  },
+  "linked_project_json_file": {
+    "relative_path": "supabase/.temp/linked-project.json",
+    "exists_locally": true,
+    "file_size": 134,
+    "last_modified_utc": "2026-04-22T11:12:20.227Z",
+    "sha256": "27971779361e48014b6b32966f03e2cf0764aedce4bc05322c1c5f5f8a1aeddc",
+    "empty_file": false
+  },
+  "relevant_roots": [
+    "supabase/functions/chat-ai-response",
+    "supabase/functions/_shared"
+  ],
+  "all_function_entrypoints": [
+    "supabase/functions/admin-reset-password/index.ts",
+    "supabase/functions/agent-test/index.ts",
+    "supabase/functions/booking-v2/index.ts",
+    "supabase/functions/chat-ai-response/index.ts",
+    "supabase/functions/check-availability/index.ts",
+    "supabase/functions/close-conversation/index.ts",
+    "supabase/functions/close-idle-conversations/index.ts",
+    "supabase/functions/core-health-check/index.ts",
+    "supabase/functions/create-initial-admin/index.ts",
+    "supabase/functions/create-user/index.ts",
+    "supabase/functions/external-actions/index.ts",
+    "supabase/functions/manage-ai-provider/index.ts",
+    "supabase/functions/operator-assistant/index.ts",
+    "supabase/functions/public-chat/index.ts",
+    "supabase/functions/send-credit-alert-email/index.ts",
+    "supabase/functions/send-follow-up-email/index.ts",
+    "supabase/functions/test-ai-provider/index.ts"
+  ],
+  "chat_booking_flow_entry": "supabase/functions/chat-ai-response/index.ts",
+  "function_dependency_graphs": [
+    {
+      "entry": "supabase/functions/admin-reset-password/index.ts",
+      "files": [
+        "supabase/functions/admin-reset-password/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/admin-reset-password/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/admin-reset-password/index.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/agent-test/index.ts",
+      "files": [
+        "supabase/functions/agent-test/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/agent-test/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/agent-test/index.ts": [
+          "https://deno.land/std@0.168.0/http/server.ts",
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/booking-v2/index.ts",
+      "files": [
+        "supabase/functions/_shared/timezone-utils.ts",
+        "supabase/functions/booking-v2/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/_shared/timezone-utils.ts": [],
+        "supabase/functions/booking-v2/index.ts": [
+          "supabase/functions/_shared/timezone-utils.ts"
+        ]
+      },
+      "external_imports": {
+        "supabase/functions/booking-v2/index.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/chat-ai-response/index.ts",
+      "files": [
+        "supabase/functions/_shared/action-types.ts",
+        "supabase/functions/_shared/availability-engine.ts",
+        "supabase/functions/_shared/booking-executor.ts",
+        "supabase/functions/_shared/booking-orchestrator.ts",
+        "supabase/functions/_shared/constants.ts",
+        "supabase/functions/_shared/context-manager.ts",
+        "supabase/functions/_shared/credit-manager.ts",
+        "supabase/functions/_shared/date-parser.ts",
+        "supabase/functions/_shared/decision-engine.ts",
+        "supabase/functions/_shared/decision-types.ts",
+        "supabase/functions/_shared/entity-extractor.ts",
+        "supabase/functions/_shared/error-handler.ts",
+        "supabase/functions/_shared/extraction-contract.ts",
+        "supabase/functions/_shared/guardrails.ts",
+        "supabase/functions/_shared/handoff-manager.ts",
+        "supabase/functions/_shared/knowledge-retriever.ts",
+        "supabase/functions/_shared/lead-manager.ts",
+        "supabase/functions/_shared/llm-provider.ts",
+        "supabase/functions/_shared/logger.ts",
+        "supabase/functions/_shared/reschedule-handler.ts",
+        "supabase/functions/_shared/response-directive.ts",
+        "supabase/functions/_shared/response-generator.ts",
+        "supabase/functions/_shared/service-resolver.ts",
+        "supabase/functions/_shared/state-machine.ts",
+        "supabase/functions/_shared/supabase-client.ts",
+        "supabase/functions/_shared/types.ts",
+        "supabase/functions/_shared/validators.ts",
+        "supabase/functions/chat-ai-response/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/_shared/action-types.ts": [],
+        "supabase/functions/_shared/availability-engine.ts": [
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/booking-executor.ts": [
+          "supabase/functions/_shared/availability-engine.ts",
+          "supabase/functions/_shared/credit-manager.ts",
+          "supabase/functions/_shared/guardrails.ts",
+          "supabase/functions/_shared/logger.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/booking-orchestrator.ts": [
+          "supabase/functions/_shared/availability-engine.ts",
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/entity-extractor.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/constants.ts": [],
+        "supabase/functions/_shared/context-manager.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/credit-manager.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/date-parser.ts": [],
+        "supabase/functions/_shared/decision-engine.ts": [
+          "supabase/functions/_shared/action-types.ts",
+          "supabase/functions/_shared/decision-types.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/decision-types.ts": [
+          "supabase/functions/_shared/action-types.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/entity-extractor.ts": [
+          "supabase/functions/_shared/date-parser.ts",
+          "supabase/functions/_shared/llm-provider.ts",
+          "supabase/functions/_shared/types.ts",
+          "supabase/functions/_shared/validators.ts"
+        ],
+        "supabase/functions/_shared/error-handler.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/context-manager.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/extraction-contract.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/types.ts",
+          "supabase/functions/_shared/validators.ts"
+        ],
+        "supabase/functions/_shared/guardrails.ts": [
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/handoff-manager.ts": [
+          "supabase/functions/_shared/logger.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/knowledge-retriever.ts": [
+          "supabase/functions/_shared/llm-provider.ts",
+          "supabase/functions/_shared/supabase-client.ts"
+        ],
+        "supabase/functions/_shared/lead-manager.ts": [
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/llm-provider.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/logger.ts": [
+          "supabase/functions/_shared/supabase-client.ts"
+        ],
+        "supabase/functions/_shared/reschedule-handler.ts": [
+          "supabase/functions/_shared/availability-engine.ts",
+          "supabase/functions/_shared/credit-manager.ts",
+          "supabase/functions/_shared/guardrails.ts",
+          "supabase/functions/_shared/logger.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/response-directive.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/response-generator.ts": [
+          "supabase/functions/_shared/llm-provider.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/service-resolver.ts": [
+          "supabase/functions/_shared/llm-provider.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/state-machine.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/supabase-client.ts": [],
+        "supabase/functions/_shared/types.ts": [],
+        "supabase/functions/_shared/validators.ts": [],
+        "supabase/functions/chat-ai-response/index.ts": [
+          "supabase/functions/_shared/booking-executor.ts",
+          "supabase/functions/_shared/booking-orchestrator.ts",
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/context-manager.ts",
+          "supabase/functions/_shared/credit-manager.ts",
+          "supabase/functions/_shared/decision-engine.ts",
+          "supabase/functions/_shared/error-handler.ts",
+          "supabase/functions/_shared/extraction-contract.ts",
+          "supabase/functions/_shared/handoff-manager.ts",
+          "supabase/functions/_shared/knowledge-retriever.ts",
+          "supabase/functions/_shared/lead-manager.ts",
+          "supabase/functions/_shared/llm-provider.ts",
+          "supabase/functions/_shared/logger.ts",
+          "supabase/functions/_shared/reschedule-handler.ts",
+          "supabase/functions/_shared/response-directive.ts",
+          "supabase/functions/_shared/response-generator.ts",
+          "supabase/functions/_shared/service-resolver.ts",
+          "supabase/functions/_shared/state-machine.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ]
+      },
+      "external_imports": {
+        "supabase/functions/_shared/booking-executor.ts": [
+          "https://deno.land/std@0.177.0/node/crypto.ts"
+        ],
+        "supabase/functions/_shared/supabase-client.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ],
+        "supabase/functions/chat-ai-response/index.ts": [
+          "https://deno.land/std@0.177.0/http/server.ts"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/check-availability/index.ts",
+      "files": [
+        "supabase/functions/_shared/external-actions-bridge.ts",
+        "supabase/functions/_shared/scheduling-actions.ts",
+        "supabase/functions/_shared/scheduling-availability.ts",
+        "supabase/functions/_shared/scheduling-capabilities.ts",
+        "supabase/functions/_shared/scheduling-credit-rules.ts",
+        "supabase/functions/_shared/timezone-utils.ts",
+        "supabase/functions/check-availability/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/_shared/external-actions-bridge.ts": [],
+        "supabase/functions/_shared/scheduling-actions.ts": [
+          "supabase/functions/_shared/external-actions-bridge.ts",
+          "supabase/functions/_shared/scheduling-availability.ts",
+          "supabase/functions/_shared/scheduling-capabilities.ts",
+          "supabase/functions/_shared/scheduling-credit-rules.ts",
+          "supabase/functions/_shared/timezone-utils.ts"
+        ],
+        "supabase/functions/_shared/scheduling-availability.ts": [
+          "supabase/functions/_shared/scheduling-capabilities.ts",
+          "supabase/functions/_shared/scheduling-credit-rules.ts"
+        ],
+        "supabase/functions/_shared/scheduling-capabilities.ts": [],
+        "supabase/functions/_shared/scheduling-credit-rules.ts": [],
+        "supabase/functions/_shared/timezone-utils.ts": [],
+        "supabase/functions/check-availability/index.ts": [
+          "supabase/functions/_shared/scheduling-actions.ts"
+        ]
+      },
+      "external_imports": {
+        "supabase/functions/_shared/scheduling-actions.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ],
+        "supabase/functions/check-availability/index.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/close-conversation/index.ts",
+      "files": [
+        "supabase/functions/_shared/constants.ts",
+        "supabase/functions/_shared/context-manager.ts",
+        "supabase/functions/_shared/lead-manager.ts",
+        "supabase/functions/_shared/supabase-client.ts",
+        "supabase/functions/_shared/types.ts",
+        "supabase/functions/close-conversation/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/_shared/constants.ts": [],
+        "supabase/functions/_shared/context-manager.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/lead-manager.ts": [
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/supabase-client.ts": [],
+        "supabase/functions/_shared/types.ts": [],
+        "supabase/functions/close-conversation/index.ts": [
+          "supabase/functions/_shared/context-manager.ts",
+          "supabase/functions/_shared/lead-manager.ts",
+          "supabase/functions/_shared/supabase-client.ts"
+        ]
+      },
+      "external_imports": {
+        "supabase/functions/_shared/supabase-client.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ],
+        "supabase/functions/close-conversation/index.ts": [
+          "https://deno.land/std@0.177.0/http/server.ts"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/close-idle-conversations/index.ts",
+      "files": [
+        "supabase/functions/_shared/constants.ts",
+        "supabase/functions/_shared/supabase-client.ts",
+        "supabase/functions/close-idle-conversations/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/_shared/constants.ts": [],
+        "supabase/functions/_shared/supabase-client.ts": [],
+        "supabase/functions/close-idle-conversations/index.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/supabase-client.ts"
+        ]
+      },
+      "external_imports": {
+        "supabase/functions/_shared/supabase-client.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ],
+        "supabase/functions/close-idle-conversations/index.ts": [
+          "https://deno.land/std@0.177.0/http/server.ts"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/core-health-check/index.ts",
+      "files": [
+        "supabase/functions/core-health-check/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/core-health-check/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/core-health-check/index.ts": [
+          "https://deno.land/std@0.168.0/http/server.ts",
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/create-initial-admin/index.ts",
+      "files": [
+        "supabase/functions/create-initial-admin/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/create-initial-admin/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/create-initial-admin/index.ts": [
+          "https://deno.land/std@0.168.0/http/server.ts",
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/create-user/index.ts",
+      "files": [
+        "supabase/functions/create-user/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/create-user/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/create-user/index.ts": [
+          "https://deno.land/std@0.168.0/http/server.ts",
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/external-actions/index.ts",
+      "files": [
+        "supabase/functions/_shared/external-actions-bridge.ts",
+        "supabase/functions/external-actions/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/_shared/external-actions-bridge.ts": [],
+        "supabase/functions/external-actions/index.ts": [
+          "supabase/functions/_shared/external-actions-bridge.ts"
+        ]
+      },
+      "external_imports": {
+        "supabase/functions/external-actions/index.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/manage-ai-provider/index.ts",
+      "files": [
+        "supabase/functions/manage-ai-provider/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/manage-ai-provider/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/manage-ai-provider/index.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/operator-assistant/index.ts",
+      "files": [
+        "supabase/functions/operator-assistant/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/operator-assistant/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/operator-assistant/index.ts": [
+          "https://deno.land/std@0.168.0/http/server.ts",
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/public-chat/index.ts",
+      "files": [
+        "supabase/functions/_shared/constants.ts",
+        "supabase/functions/_shared/context-manager.ts",
+        "supabase/functions/_shared/logger.ts",
+        "supabase/functions/_shared/supabase-client.ts",
+        "supabase/functions/_shared/types.ts",
+        "supabase/functions/public-chat/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/_shared/constants.ts": [],
+        "supabase/functions/_shared/context-manager.ts": [
+          "supabase/functions/_shared/constants.ts",
+          "supabase/functions/_shared/supabase-client.ts",
+          "supabase/functions/_shared/types.ts"
+        ],
+        "supabase/functions/_shared/logger.ts": [
+          "supabase/functions/_shared/supabase-client.ts"
+        ],
+        "supabase/functions/_shared/supabase-client.ts": [],
+        "supabase/functions/_shared/types.ts": [],
+        "supabase/functions/public-chat/index.ts": [
+          "supabase/functions/_shared/context-manager.ts",
+          "supabase/functions/_shared/logger.ts",
+          "supabase/functions/_shared/supabase-client.ts"
+        ]
+      },
+      "external_imports": {
+        "supabase/functions/_shared/supabase-client.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ],
+        "supabase/functions/public-chat/index.ts": [
+          "https://deno.land/std@0.177.0/http/server.ts"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/send-credit-alert-email/index.ts",
+      "files": [
+        "supabase/functions/send-credit-alert-email/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/send-credit-alert-email/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/send-credit-alert-email/index.ts": [
+          "https://deno.land/std@0.190.0/http/server.ts",
+          "https://esm.sh/@supabase/supabase-js@2.39.0"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/send-follow-up-email/index.ts",
+      "files": [
+        "supabase/functions/send-follow-up-email/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/send-follow-up-email/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/send-follow-up-email/index.ts": [
+          "https://deno.land/std@0.190.0/http/server.ts",
+          "https://esm.sh/@supabase/supabase-js@2.39.0"
+        ]
+      },
+      "missing_imports": []
+    },
+    {
+      "entry": "supabase/functions/test-ai-provider/index.ts",
+      "files": [
+        "supabase/functions/test-ai-provider/index.ts"
+      ],
+      "edges": {
+        "supabase/functions/test-ai-provider/index.ts": []
+      },
+      "external_imports": {
+        "supabase/functions/test-ai-provider/index.ts": [
+          "https://esm.sh/@supabase/supabase-js@2"
+        ]
+      },
+      "missing_imports": []
+    }
+  ],
+  "functions_intersecting_chat_flow": [
+    {
+      "function_entry": "supabase/functions/close-conversation/index.ts",
+      "shared_files_with_chat_flow": [
+        "supabase/functions/_shared/constants.ts",
+        "supabase/functions/_shared/context-manager.ts",
+        "supabase/functions/_shared/lead-manager.ts",
+        "supabase/functions/_shared/supabase-client.ts",
+        "supabase/functions/_shared/types.ts"
+      ]
+    },
+    {
+      "function_entry": "supabase/functions/close-idle-conversations/index.ts",
+      "shared_files_with_chat_flow": [
+        "supabase/functions/_shared/constants.ts",
+        "supabase/functions/_shared/supabase-client.ts"
+      ]
+    },
+    {
+      "function_entry": "supabase/functions/public-chat/index.ts",
+      "shared_files_with_chat_flow": [
+        "supabase/functions/_shared/constants.ts",
+        "supabase/functions/_shared/context-manager.ts",
+        "supabase/functions/_shared/logger.ts",
+        "supabase/functions/_shared/supabase-client.ts",
+        "supabase/functions/_shared/types.ts"
+      ]
+    }
+  ],
+  "required_files": [
+    {
+      "relative_path": "supabase/functions/chat-ai-response/index.ts",
+      "exists_locally": true,
+      "file_size": 82483,
+      "last_modified_utc": "2026-04-23T18:44:08.129Z",
+      "sha256": "66e45a1cdb977d9e741807539b5150e10c40118fc46f7c6a3dd3873e782e5675",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/types.ts",
+      "exists_locally": true,
+      "file_size": 7685,
+      "last_modified_utc": "2026-04-23T10:08:27.727Z",
+      "sha256": "723bf105c0beea6afed01e313fab0539bb4fb553cdbde0d6254eb94d6b7fed18",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/action-types.ts",
+      "exists_locally": true,
+      "file_size": 448,
+      "last_modified_utc": "2026-04-23T09:26:15.051Z",
+      "sha256": "60d85f210182552b76399f9cbefd60168dbb6a3c5aed6e69494d852c4b219d53",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/decision-types.ts",
+      "exists_locally": true,
+      "file_size": 630,
+      "last_modified_utc": "2026-04-22T10:38:56.204Z",
+      "sha256": "9d16b13363b0e733fcadf100ffbeca7bf0d398f1e9efd7de46a2abdff71cf1a8",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/context-manager.ts",
+      "exists_locally": true,
+      "file_size": 5004,
+      "last_modified_utc": "2026-04-23T10:08:37.197Z",
+      "sha256": "7194040fc64b9ea1aa34bba0c7ad288bf6041e07482f29ac5e12d8a7e02f6b21",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/decision-engine.ts",
+      "exists_locally": true,
+      "file_size": 15750,
+      "last_modified_utc": "2026-04-23T10:19:42.008Z",
+      "sha256": "1aad10c04fe092d0e36008111d38846d1f8b4d03f6782100121a1349e273257c",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-orchestrator.ts",
+      "exists_locally": true,
+      "file_size": 15685,
+      "last_modified_utc": "2026-04-23T10:15:41.526Z",
+      "sha256": "44adb7830807c7ab02d8e4067f2b40f8e4a2e123665c4092f9d811c3cebbce06",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/availability-engine.ts",
+      "exists_locally": true,
+      "file_size": 10204,
+      "last_modified_utc": "2026-04-23T10:19:23.189Z",
+      "sha256": "e5e104dfe46ac16b7b5a0da0245bbcdb1635bbe7ae4ae5e3368ddd84d6f98b81",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-executor.ts",
+      "exists_locally": true,
+      "file_size": 8123,
+      "last_modified_utc": "2026-04-23T08:47:43.143Z",
+      "sha256": "aa103f60279e7e94dcac7cb7e24c40c80c63d333de4faf7504e98bb6c35618d3",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/reschedule-handler.ts",
+      "exists_locally": true,
+      "file_size": 4583,
+      "last_modified_utc": "2026-04-23T10:14:56.117Z",
+      "sha256": "1d9a65246c7a0b5f433ee0a9814c7a85f7d7857069dd12463865e6a95ff44cf8",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/extraction-contract.ts",
+      "exists_locally": true,
+      "file_size": 10488,
+      "last_modified_utc": "2026-04-23T10:08:56.037Z",
+      "sha256": "e27afdc440fbb924b44829252e6484ddc0e0649e9587fd54e2db7b36b42797f5",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/validators.ts",
+      "exists_locally": true,
+      "file_size": 1960,
+      "last_modified_utc": "2026-04-16T21:07:31.880Z",
+      "sha256": "b7eafa9a4d33e7ea4b61163980688a4bddd58e1224901c9fb8fe5775b6c5a1da",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/constants.ts",
+      "exists_locally": true,
+      "file_size": 8652,
+      "last_modified_utc": "2026-04-16T21:07:31.858Z",
+      "sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/state-machine.ts",
+      "exists_locally": true,
+      "file_size": 1103,
+      "last_modified_utc": "2026-04-16T21:13:10.874Z",
+      "sha256": "633bf7e6c96795c9e46568a4a8e7f56c497334af757f7e60b17143cdedfd1958",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/response-generator.ts",
+      "exists_locally": true,
+      "file_size": 3099,
+      "last_modified_utc": "2026-04-12T20:05:46.506Z",
+      "sha256": "c8bfe06277fb7bd423b7897e498149d6ff44390d3c359e47fa0fced2e575f8c0",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/response-directive.ts",
+      "exists_locally": true,
+      "file_size": 7042,
+      "last_modified_utc": "2026-04-16T21:18:47.241Z",
+      "sha256": "931c3d6d9fa18ec5407637f72d094fe184871001f8fce6b6b466723d162bacee",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/service-resolver.ts",
+      "exists_locally": true,
+      "file_size": 4666,
+      "last_modified_utc": "2026-04-22T13:21:17.762Z",
+      "sha256": "6548d0c95949503403f8378544a4b8e5bb1c0f7f715a7b5b87a4165f9ff613c0",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/error-handler.ts",
+      "exists_locally": true,
+      "file_size": 5944,
+      "last_modified_utc": "2026-04-16T21:22:03.480Z",
+      "sha256": "12ce0ad9edea96f32917e466cb1721f0d554b7d245575db675852e087ab6baec",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/knowledge-retriever.ts",
+      "exists_locally": true,
+      "file_size": 1951,
+      "last_modified_utc": "2026-04-12T20:05:46.498Z",
+      "sha256": "f888de22ee622a5b17723cb15e2e353334820a14c3ad2a56015003a143100f91",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/llm-provider.ts",
+      "exists_locally": true,
+      "file_size": 6449,
+      "last_modified_utc": "2026-04-12T20:05:46.500Z",
+      "sha256": "27f2ae11d8b98e56be72df1fa678712fd7ec9f3465a7e1d24dbffcd21ae92915",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/logger.ts",
+      "exists_locally": true,
+      "file_size": 1619,
+      "last_modified_utc": "2026-04-12T20:05:46.502Z",
+      "sha256": "87a90081e71821dbcfb3770acfd9f68ce07a23caea302690dd96e9b1eaca5f8a",
+      "empty_file": false
+    }
+  ],
+  "relevant_files_manifest": [
+    {
+      "relative_path": "supabase/functions/chat-ai-response/index.ts",
+      "exists_locally": true,
+      "file_size": 82483,
+      "last_modified_utc": "2026-04-23T18:44:08.129Z",
+      "sha256": "66e45a1cdb977d9e741807539b5150e10c40118fc46f7c6a3dd3873e782e5675",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/action-layer.ts",
+      "exists_locally": true,
+      "file_size": 13372,
+      "last_modified_utc": "2026-04-12T13:07:09.072Z",
+      "sha256": "9fb30dba3ce07c8bf1d3feea515139926a85e2cf54fc926d37d9d335c2e36c08",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/action-types.ts",
+      "exists_locally": true,
+      "file_size": 448,
+      "last_modified_utc": "2026-04-23T09:26:15.051Z",
+      "sha256": "60d85f210182552b76399f9cbefd60168dbb6a3c5aed6e69494d852c4b219d53",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/auto-close.ts",
+      "exists_locally": true,
+      "file_size": 10475,
+      "last_modified_utc": "2026-04-12T13:07:09.072Z",
+      "sha256": "3461284d7b964a13156b71619a9d559f1fdcfb26487ce1a52bcd8f50e8cb615b",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/availability-engine.ts",
+      "exists_locally": true,
+      "file_size": 10204,
+      "last_modified_utc": "2026-04-23T10:19:23.189Z",
+      "sha256": "e5e104dfe46ac16b7b5a0da0245bbcdb1635bbe7ae4ae5e3368ddd84d6f98b81",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/behavioral-contract.ts",
+      "exists_locally": true,
+      "file_size": 5906,
+      "last_modified_utc": "2026-04-12T13:07:09.072Z",
+      "sha256": "84db6d98557df3c0d946525a7ad3d45f3135b90aeb7fcefdd76744ea3b1aad9a",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-engine.ts",
+      "exists_locally": true,
+      "file_size": 31178,
+      "last_modified_utc": "2026-04-12T13:07:09.072Z",
+      "sha256": "53f9dc7886b04dda33c00dcfb287f4872f482bc8ce729dc854a2f3b94b889376",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-executor.ts",
+      "exists_locally": true,
+      "file_size": 8123,
+      "last_modified_utc": "2026-04-23T08:47:43.143Z",
+      "sha256": "aa103f60279e7e94dcac7cb7e24c40c80c63d333de4faf7504e98bb6c35618d3",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-lifecycle-orchestrator.ts",
+      "exists_locally": true,
+      "file_size": 21413,
+      "last_modified_utc": "2026-04-12T13:07:09.074Z",
+      "sha256": "b8d5cec6452f78996e00c589594c454711ba917bff1b4dccf389ba8e8a6215c9",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-orchestrator.ts",
+      "exists_locally": true,
+      "file_size": 15685,
+      "last_modified_utc": "2026-04-23T10:15:41.526Z",
+      "sha256": "44adb7830807c7ab02d8e4067f2b40f8e4a2e123665c4092f9d811c3cebbce06",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/constants.ts",
+      "exists_locally": true,
+      "file_size": 8652,
+      "last_modified_utc": "2026-04-16T21:07:31.858Z",
+      "sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/context-manager.ts",
+      "exists_locally": true,
+      "file_size": 5004,
+      "last_modified_utc": "2026-04-23T10:08:37.197Z",
+      "sha256": "7194040fc64b9ea1aa34bba0c7ad288bf6041e07482f29ac5e12d8a7e02f6b21",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/conversation-context.ts",
+      "exists_locally": true,
+      "file_size": 4721,
+      "last_modified_utc": "2026-04-12T13:07:09.074Z",
+      "sha256": "1f24caf4d12a4f09e738fab54360e82dde9d236caad4179fcaa1f20ea0ad085c",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/conversation-convergence.ts",
+      "exists_locally": true,
+      "file_size": 989,
+      "last_modified_utc": "2026-04-12T13:07:09.074Z",
+      "sha256": "7edf36ebda54a58b599d53ac841e2fd60aaf0bcb9990da71a260227ff84b88ae",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/conversation-orchestrator-v2.ts",
+      "exists_locally": true,
+      "file_size": 21707,
+      "last_modified_utc": "2026-04-12T13:07:09.074Z",
+      "sha256": "763707a3eeb1e91911005678c2414357696da0b5f8ed873594eb5192e947b3c9",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/conversation-states.ts",
+      "exists_locally": true,
+      "file_size": 1609,
+      "last_modified_utc": "2026-04-12T13:07:09.076Z",
+      "sha256": "2365b5a1aaafef9f29d2ba3497a91a5b67b9ee47fa9eee3393b2adc88848930a",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/credit-manager.ts",
+      "exists_locally": true,
+      "file_size": 3999,
+      "last_modified_utc": "2026-04-12T20:05:46.488Z",
+      "sha256": "63cdad285ffd7c2924e57d4bbbf6be676bd7b7672e2035d35fac9123b68c1082",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/date-parser.ts",
+      "exists_locally": true,
+      "file_size": 5077,
+      "last_modified_utc": "2026-04-12T20:05:46.490Z",
+      "sha256": "b5a0bf2225915388385e2eb1e1183e21eebcbb4fd3c3df4758b42ce63805a7f2",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/decision-engine.ts",
+      "exists_locally": true,
+      "file_size": 15750,
+      "last_modified_utc": "2026-04-23T10:19:42.008Z",
+      "sha256": "1aad10c04fe092d0e36008111d38846d1f8b4d03f6782100121a1349e273257c",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/decision-types.ts",
+      "exists_locally": true,
+      "file_size": 630,
+      "last_modified_utc": "2026-04-22T10:38:56.204Z",
+      "sha256": "9d16b13363b0e733fcadf100ffbeca7bf0d398f1e9efd7de46a2abdff71cf1a8",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/deterministic-field-extractor.ts",
+      "exists_locally": true,
+      "file_size": 15076,
+      "last_modified_utc": "2026-04-12T13:07:09.076Z",
+      "sha256": "ab8518281aa96b1b9b09d584ec522a328874256e43e895d43d22280d2526be65",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/email-engine.ts",
+      "exists_locally": true,
+      "file_size": 6610,
+      "last_modified_utc": "2026-04-12T13:07:09.076Z",
+      "sha256": "fbbe1a2815aa7a96e744efadd226542365327064875cd3d6b9386618ade98704",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/entity-extractor.ts",
+      "exists_locally": true,
+      "file_size": 4442,
+      "last_modified_utc": "2026-04-13T22:30:57.398Z",
+      "sha256": "383c43b376ac01e7dd7baaa5aa478c85098f6a2291690bb550ec5601329311df",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/error-handler.ts",
+      "exists_locally": true,
+      "file_size": 5944,
+      "last_modified_utc": "2026-04-16T21:22:03.480Z",
+      "sha256": "12ce0ad9edea96f32917e466cb1721f0d554b7d245575db675852e087ab6baec",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/external-actions-bridge.ts",
+      "exists_locally": true,
+      "file_size": 14965,
+      "last_modified_utc": "2026-04-12T13:07:09.076Z",
+      "sha256": "84e158137a56a59e49b51fa9ad137e2ca44d3c5bd0ce666e753388cf909531b0",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/extraction-contract.ts",
+      "exists_locally": true,
+      "file_size": 10488,
+      "last_modified_utc": "2026-04-23T10:08:56.037Z",
+      "sha256": "e27afdc440fbb924b44829252e6484ddc0e0649e9587fd54e2db7b36b42797f5",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/follow-up-engine.ts",
+      "exists_locally": true,
+      "file_size": 7396,
+      "last_modified_utc": "2026-04-12T13:07:09.078Z",
+      "sha256": "08d52c2ff6f17e524a6754c2a1ae4ddb71cb32dea1b093db295d471437e8e4b7",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/guardrails.ts",
+      "exists_locally": true,
+      "file_size": 2612,
+      "last_modified_utc": "2026-04-12T20:05:46.492Z",
+      "sha256": "8583ea598edcd7059ccad9998db1524007016a82e6d139c5765de04dd5e0666c",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/handoff-manager.ts",
+      "exists_locally": true,
+      "file_size": 1304,
+      "last_modified_utc": "2026-04-12T20:05:46.494Z",
+      "sha256": "537604700ed3e4b5f2176d21831b00548288c9afb00d67ea222d79c6ed868e07",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/intent-router.ts",
+      "exists_locally": true,
+      "file_size": 4579,
+      "last_modified_utc": "2026-04-13T22:30:57.362Z",
+      "sha256": "0d1e2cde4b665c329f5ff5c18a7152d9ee82c21c05efd7478dc1b9ffc87bb50b",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/knowledge-retriever.ts",
+      "exists_locally": true,
+      "file_size": 1951,
+      "last_modified_utc": "2026-04-12T20:05:46.498Z",
+      "sha256": "f888de22ee622a5b17723cb15e2e353334820a14c3ad2a56015003a143100f91",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/lead-manager.ts",
+      "exists_locally": true,
+      "file_size": 1334,
+      "last_modified_utc": "2026-04-12T20:05:46.498Z",
+      "sha256": "a50c836556d7f560e223b6197ce813c107ce3bf664f38d09c19acdd37fa74782",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/llm-provider.ts",
+      "exists_locally": true,
+      "file_size": 6449,
+      "last_modified_utc": "2026-04-12T20:05:46.500Z",
+      "sha256": "27f2ae11d8b98e56be72df1fa678712fd7ec9f3465a7e1d24dbffcd21ae92915",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/llm-state-machine-contract-v1.md",
+      "exists_locally": true,
+      "file_size": 22251,
+      "last_modified_utc": "2026-04-16T21:07:31.899Z",
+      "sha256": "7bd4195b58e2e20ebf9e81cc00c2317a93ad759b263865bf496df3f1c0cca566",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/logger.ts",
+      "exists_locally": true,
+      "file_size": 1619,
+      "last_modified_utc": "2026-04-12T20:05:46.502Z",
+      "sha256": "87a90081e71821dbcfb3770acfd9f68ce07a23caea302690dd96e9b1eaca5f8a",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/platform-events.ts",
+      "exists_locally": true,
+      "file_size": 3312,
+      "last_modified_utc": "2026-04-12T13:07:09.078Z",
+      "sha256": "0fbc490f3f876843fa5a4b720304f1ceac2e83a6fff89d018e2a73aab2fa9e8f",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/reschedule-engine.ts",
+      "exists_locally": true,
+      "file_size": 11453,
+      "last_modified_utc": "2026-04-12T13:07:09.078Z",
+      "sha256": "b129cb7356f43bc8a4f30cc9e0df3388cbd4c3e952cefd3ff8fbe3cf753b0b86",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/reschedule-handler.ts",
+      "exists_locally": true,
+      "file_size": 4583,
+      "last_modified_utc": "2026-04-23T10:14:56.117Z",
+      "sha256": "1d9a65246c7a0b5f433ee0a9814c7a85f7d7857069dd12463865e6a95ff44cf8",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/response-directive.ts",
+      "exists_locally": true,
+      "file_size": 7042,
+      "last_modified_utc": "2026-04-16T21:18:47.241Z",
+      "sha256": "931c3d6d9fa18ec5407637f72d094fe184871001f8fce6b6b466723d162bacee",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/response-generator.ts",
+      "exists_locally": true,
+      "file_size": 3099,
+      "last_modified_utc": "2026-04-12T20:05:46.506Z",
+      "sha256": "c8bfe06277fb7bd423b7897e498149d6ff44390d3c359e47fa0fced2e575f8c0",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-actions.ts",
+      "exists_locally": true,
+      "file_size": 74036,
+      "last_modified_utc": "2026-04-12T13:07:09.078Z",
+      "sha256": "acd94c13d5d4da18bb8db2cd5869e1f11ef4ac6d1511d8be4d74631063b6b13e",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-availability.ts",
+      "exists_locally": true,
+      "file_size": 22324,
+      "last_modified_utc": "2026-04-12T13:07:09.080Z",
+      "sha256": "f60743174c799e52b8e9bc3068923c13bbe169863ef5ab3900bd87e55583e9a7",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-capabilities.ts",
+      "exists_locally": true,
+      "file_size": 3352,
+      "last_modified_utc": "2026-04-12T13:07:09.080Z",
+      "sha256": "f50a14ec93b37cbbaf8d64e8523bf15a498bb2b0d114b95530957d7b581b45eb",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-credit-rules.ts",
+      "exists_locally": true,
+      "file_size": 2158,
+      "last_modified_utc": "2026-04-12T13:07:09.080Z",
+      "sha256": "4a85fa850a2a77229b6b41c9893a44dae417ca2939f6ced22d9b281aff11aead",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-engine.ts",
+      "exists_locally": true,
+      "file_size": 24291,
+      "last_modified_utc": "2026-04-12T13:07:09.080Z",
+      "sha256": "f655fd34ac7bed21eb034044b50a3fb57d7dc3f4b326b5bed8a338dba1c21041",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/semantic-service-resolver.ts",
+      "exists_locally": true,
+      "file_size": 7059,
+      "last_modified_utc": "2026-04-12T13:07:09.082Z",
+      "sha256": "d97278a52909f33b30f6e972cc6b0668114e6fa87b26aa5fbd02c2b1f69afba7",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/service-resolver.ts",
+      "exists_locally": true,
+      "file_size": 4666,
+      "last_modified_utc": "2026-04-22T13:21:17.762Z",
+      "sha256": "6548d0c95949503403f8378544a4b8e5bb1c0f7f715a7b5b87a4165f9ff613c0",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/state-machine.ts",
+      "exists_locally": true,
+      "file_size": 1103,
+      "last_modified_utc": "2026-04-16T21:13:10.874Z",
+      "sha256": "633bf7e6c96795c9e46568a4a8e7f56c497334af757f7e60b17143cdedfd1958",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/structured-field-extractor.ts",
+      "exists_locally": true,
+      "file_size": 15156,
+      "last_modified_utc": "2026-04-12T13:07:09.082Z",
+      "sha256": "33820b454b017b1d739a4106ce9d48e8b00768cbadeae25d810ba7d20a104012",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/supabase-client.ts",
+      "exists_locally": true,
+      "file_size": 1012,
+      "last_modified_utc": "2026-04-12T20:05:46.512Z",
+      "sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/timezone-utils.ts",
+      "exists_locally": true,
+      "file_size": 1140,
+      "last_modified_utc": "2026-04-12T13:07:09.082Z",
+      "sha256": "e4c456abef19ab9a68d0e02388028b1ed58d49b783c6757c1de6ab5a59b83ee2",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/types.ts",
+      "exists_locally": true,
+      "file_size": 7685,
+      "last_modified_utc": "2026-04-23T10:08:27.727Z",
+      "sha256": "723bf105c0beea6afed01e313fab0539bb4fb553cdbde0d6254eb94d6b7fed18",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/validators.ts",
+      "exists_locally": true,
+      "file_size": 1960,
+      "last_modified_utc": "2026-04-16T21:07:31.880Z",
+      "sha256": "b7eafa9a4d33e7ea4b61163980688a4bddd58e1224901c9fb8fe5775b6c5a1da",
+      "empty_file": false
+    }
+  ],
+  "all_functions_manifest": [
+    {
+      "relative_path": "supabase/functions/_shared/action-layer.ts",
+      "exists_locally": true,
+      "file_size": 13372,
+      "last_modified_utc": "2026-04-12T13:07:09.072Z",
+      "sha256": "9fb30dba3ce07c8bf1d3feea515139926a85e2cf54fc926d37d9d335c2e36c08",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/action-types.ts",
+      "exists_locally": true,
+      "file_size": 448,
+      "last_modified_utc": "2026-04-23T09:26:15.051Z",
+      "sha256": "60d85f210182552b76399f9cbefd60168dbb6a3c5aed6e69494d852c4b219d53",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/auto-close.ts",
+      "exists_locally": true,
+      "file_size": 10475,
+      "last_modified_utc": "2026-04-12T13:07:09.072Z",
+      "sha256": "3461284d7b964a13156b71619a9d559f1fdcfb26487ce1a52bcd8f50e8cb615b",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/availability-engine.ts",
+      "exists_locally": true,
+      "file_size": 10204,
+      "last_modified_utc": "2026-04-23T10:19:23.189Z",
+      "sha256": "e5e104dfe46ac16b7b5a0da0245bbcdb1635bbe7ae4ae5e3368ddd84d6f98b81",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/behavioral-contract.ts",
+      "exists_locally": true,
+      "file_size": 5906,
+      "last_modified_utc": "2026-04-12T13:07:09.072Z",
+      "sha256": "84db6d98557df3c0d946525a7ad3d45f3135b90aeb7fcefdd76744ea3b1aad9a",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-engine.ts",
+      "exists_locally": true,
+      "file_size": 31178,
+      "last_modified_utc": "2026-04-12T13:07:09.072Z",
+      "sha256": "53f9dc7886b04dda33c00dcfb287f4872f482bc8ce729dc854a2f3b94b889376",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-executor.ts",
+      "exists_locally": true,
+      "file_size": 8123,
+      "last_modified_utc": "2026-04-23T08:47:43.143Z",
+      "sha256": "aa103f60279e7e94dcac7cb7e24c40c80c63d333de4faf7504e98bb6c35618d3",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-lifecycle-orchestrator.ts",
+      "exists_locally": true,
+      "file_size": 21413,
+      "last_modified_utc": "2026-04-12T13:07:09.074Z",
+      "sha256": "b8d5cec6452f78996e00c589594c454711ba917bff1b4dccf389ba8e8a6215c9",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/booking-orchestrator.ts",
+      "exists_locally": true,
+      "file_size": 15685,
+      "last_modified_utc": "2026-04-23T10:15:41.526Z",
+      "sha256": "44adb7830807c7ab02d8e4067f2b40f8e4a2e123665c4092f9d811c3cebbce06",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/constants.ts",
+      "exists_locally": true,
+      "file_size": 8652,
+      "last_modified_utc": "2026-04-16T21:07:31.858Z",
+      "sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/context-manager.ts",
+      "exists_locally": true,
+      "file_size": 5004,
+      "last_modified_utc": "2026-04-23T10:08:37.197Z",
+      "sha256": "7194040fc64b9ea1aa34bba0c7ad288bf6041e07482f29ac5e12d8a7e02f6b21",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/conversation-context.ts",
+      "exists_locally": true,
+      "file_size": 4721,
+      "last_modified_utc": "2026-04-12T13:07:09.074Z",
+      "sha256": "1f24caf4d12a4f09e738fab54360e82dde9d236caad4179fcaa1f20ea0ad085c",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/conversation-convergence.ts",
+      "exists_locally": true,
+      "file_size": 989,
+      "last_modified_utc": "2026-04-12T13:07:09.074Z",
+      "sha256": "7edf36ebda54a58b599d53ac841e2fd60aaf0bcb9990da71a260227ff84b88ae",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/conversation-orchestrator-v2.ts",
+      "exists_locally": true,
+      "file_size": 21707,
+      "last_modified_utc": "2026-04-12T13:07:09.074Z",
+      "sha256": "763707a3eeb1e91911005678c2414357696da0b5f8ed873594eb5192e947b3c9",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/conversation-states.ts",
+      "exists_locally": true,
+      "file_size": 1609,
+      "last_modified_utc": "2026-04-12T13:07:09.076Z",
+      "sha256": "2365b5a1aaafef9f29d2ba3497a91a5b67b9ee47fa9eee3393b2adc88848930a",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/credit-manager.ts",
+      "exists_locally": true,
+      "file_size": 3999,
+      "last_modified_utc": "2026-04-12T20:05:46.488Z",
+      "sha256": "63cdad285ffd7c2924e57d4bbbf6be676bd7b7672e2035d35fac9123b68c1082",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/date-parser.ts",
+      "exists_locally": true,
+      "file_size": 5077,
+      "last_modified_utc": "2026-04-12T20:05:46.490Z",
+      "sha256": "b5a0bf2225915388385e2eb1e1183e21eebcbb4fd3c3df4758b42ce63805a7f2",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/decision-engine.ts",
+      "exists_locally": true,
+      "file_size": 15750,
+      "last_modified_utc": "2026-04-23T10:19:42.008Z",
+      "sha256": "1aad10c04fe092d0e36008111d38846d1f8b4d03f6782100121a1349e273257c",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/decision-types.ts",
+      "exists_locally": true,
+      "file_size": 630,
+      "last_modified_utc": "2026-04-22T10:38:56.204Z",
+      "sha256": "9d16b13363b0e733fcadf100ffbeca7bf0d398f1e9efd7de46a2abdff71cf1a8",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/deterministic-field-extractor.ts",
+      "exists_locally": true,
+      "file_size": 15076,
+      "last_modified_utc": "2026-04-12T13:07:09.076Z",
+      "sha256": "ab8518281aa96b1b9b09d584ec522a328874256e43e895d43d22280d2526be65",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/email-engine.ts",
+      "exists_locally": true,
+      "file_size": 6610,
+      "last_modified_utc": "2026-04-12T13:07:09.076Z",
+      "sha256": "fbbe1a2815aa7a96e744efadd226542365327064875cd3d6b9386618ade98704",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/entity-extractor.ts",
+      "exists_locally": true,
+      "file_size": 4442,
+      "last_modified_utc": "2026-04-13T22:30:57.398Z",
+      "sha256": "383c43b376ac01e7dd7baaa5aa478c85098f6a2291690bb550ec5601329311df",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/error-handler.ts",
+      "exists_locally": true,
+      "file_size": 5944,
+      "last_modified_utc": "2026-04-16T21:22:03.480Z",
+      "sha256": "12ce0ad9edea96f32917e466cb1721f0d554b7d245575db675852e087ab6baec",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/external-actions-bridge.ts",
+      "exists_locally": true,
+      "file_size": 14965,
+      "last_modified_utc": "2026-04-12T13:07:09.076Z",
+      "sha256": "84e158137a56a59e49b51fa9ad137e2ca44d3c5bd0ce666e753388cf909531b0",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/extraction-contract.ts",
+      "exists_locally": true,
+      "file_size": 10488,
+      "last_modified_utc": "2026-04-23T10:08:56.037Z",
+      "sha256": "e27afdc440fbb924b44829252e6484ddc0e0649e9587fd54e2db7b36b42797f5",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/follow-up-engine.ts",
+      "exists_locally": true,
+      "file_size": 7396,
+      "last_modified_utc": "2026-04-12T13:07:09.078Z",
+      "sha256": "08d52c2ff6f17e524a6754c2a1ae4ddb71cb32dea1b093db295d471437e8e4b7",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/guardrails.ts",
+      "exists_locally": true,
+      "file_size": 2612,
+      "last_modified_utc": "2026-04-12T20:05:46.492Z",
+      "sha256": "8583ea598edcd7059ccad9998db1524007016a82e6d139c5765de04dd5e0666c",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/handoff-manager.ts",
+      "exists_locally": true,
+      "file_size": 1304,
+      "last_modified_utc": "2026-04-12T20:05:46.494Z",
+      "sha256": "537604700ed3e4b5f2176d21831b00548288c9afb00d67ea222d79c6ed868e07",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/intent-router.ts",
+      "exists_locally": true,
+      "file_size": 4579,
+      "last_modified_utc": "2026-04-13T22:30:57.362Z",
+      "sha256": "0d1e2cde4b665c329f5ff5c18a7152d9ee82c21c05efd7478dc1b9ffc87bb50b",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/knowledge-retriever.ts",
+      "exists_locally": true,
+      "file_size": 1951,
+      "last_modified_utc": "2026-04-12T20:05:46.498Z",
+      "sha256": "f888de22ee622a5b17723cb15e2e353334820a14c3ad2a56015003a143100f91",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/lead-manager.ts",
+      "exists_locally": true,
+      "file_size": 1334,
+      "last_modified_utc": "2026-04-12T20:05:46.498Z",
+      "sha256": "a50c836556d7f560e223b6197ce813c107ce3bf664f38d09c19acdd37fa74782",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/llm-provider.ts",
+      "exists_locally": true,
+      "file_size": 6449,
+      "last_modified_utc": "2026-04-12T20:05:46.500Z",
+      "sha256": "27f2ae11d8b98e56be72df1fa678712fd7ec9f3465a7e1d24dbffcd21ae92915",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/llm-state-machine-contract-v1.md",
+      "exists_locally": true,
+      "file_size": 22251,
+      "last_modified_utc": "2026-04-16T21:07:31.899Z",
+      "sha256": "7bd4195b58e2e20ebf9e81cc00c2317a93ad759b263865bf496df3f1c0cca566",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/logger.ts",
+      "exists_locally": true,
+      "file_size": 1619,
+      "last_modified_utc": "2026-04-12T20:05:46.502Z",
+      "sha256": "87a90081e71821dbcfb3770acfd9f68ce07a23caea302690dd96e9b1eaca5f8a",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/platform-events.ts",
+      "exists_locally": true,
+      "file_size": 3312,
+      "last_modified_utc": "2026-04-12T13:07:09.078Z",
+      "sha256": "0fbc490f3f876843fa5a4b720304f1ceac2e83a6fff89d018e2a73aab2fa9e8f",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/reschedule-engine.ts",
+      "exists_locally": true,
+      "file_size": 11453,
+      "last_modified_utc": "2026-04-12T13:07:09.078Z",
+      "sha256": "b129cb7356f43bc8a4f30cc9e0df3388cbd4c3e952cefd3ff8fbe3cf753b0b86",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/reschedule-handler.ts",
+      "exists_locally": true,
+      "file_size": 4583,
+      "last_modified_utc": "2026-04-23T10:14:56.117Z",
+      "sha256": "1d9a65246c7a0b5f433ee0a9814c7a85f7d7857069dd12463865e6a95ff44cf8",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/response-directive.ts",
+      "exists_locally": true,
+      "file_size": 7042,
+      "last_modified_utc": "2026-04-16T21:18:47.241Z",
+      "sha256": "931c3d6d9fa18ec5407637f72d094fe184871001f8fce6b6b466723d162bacee",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/response-generator.ts",
+      "exists_locally": true,
+      "file_size": 3099,
+      "last_modified_utc": "2026-04-12T20:05:46.506Z",
+      "sha256": "c8bfe06277fb7bd423b7897e498149d6ff44390d3c359e47fa0fced2e575f8c0",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-actions.ts",
+      "exists_locally": true,
+      "file_size": 74036,
+      "last_modified_utc": "2026-04-12T13:07:09.078Z",
+      "sha256": "acd94c13d5d4da18bb8db2cd5869e1f11ef4ac6d1511d8be4d74631063b6b13e",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-availability.ts",
+      "exists_locally": true,
+      "file_size": 22324,
+      "last_modified_utc": "2026-04-12T13:07:09.080Z",
+      "sha256": "f60743174c799e52b8e9bc3068923c13bbe169863ef5ab3900bd87e55583e9a7",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-capabilities.ts",
+      "exists_locally": true,
+      "file_size": 3352,
+      "last_modified_utc": "2026-04-12T13:07:09.080Z",
+      "sha256": "f50a14ec93b37cbbaf8d64e8523bf15a498bb2b0d114b95530957d7b581b45eb",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-credit-rules.ts",
+      "exists_locally": true,
+      "file_size": 2158,
+      "last_modified_utc": "2026-04-12T13:07:09.080Z",
+      "sha256": "4a85fa850a2a77229b6b41c9893a44dae417ca2939f6ced22d9b281aff11aead",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/scheduling-engine.ts",
+      "exists_locally": true,
+      "file_size": 24291,
+      "last_modified_utc": "2026-04-12T13:07:09.080Z",
+      "sha256": "f655fd34ac7bed21eb034044b50a3fb57d7dc3f4b326b5bed8a338dba1c21041",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/semantic-service-resolver.ts",
+      "exists_locally": true,
+      "file_size": 7059,
+      "last_modified_utc": "2026-04-12T13:07:09.082Z",
+      "sha256": "d97278a52909f33b30f6e972cc6b0668114e6fa87b26aa5fbd02c2b1f69afba7",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/service-resolver.ts",
+      "exists_locally": true,
+      "file_size": 4666,
+      "last_modified_utc": "2026-04-22T13:21:17.762Z",
+      "sha256": "6548d0c95949503403f8378544a4b8e5bb1c0f7f715a7b5b87a4165f9ff613c0",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/state-machine.ts",
+      "exists_locally": true,
+      "file_size": 1103,
+      "last_modified_utc": "2026-04-16T21:13:10.874Z",
+      "sha256": "633bf7e6c96795c9e46568a4a8e7f56c497334af757f7e60b17143cdedfd1958",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/structured-field-extractor.ts",
+      "exists_locally": true,
+      "file_size": 15156,
+      "last_modified_utc": "2026-04-12T13:07:09.082Z",
+      "sha256": "33820b454b017b1d739a4106ce9d48e8b00768cbadeae25d810ba7d20a104012",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/supabase-client.ts",
+      "exists_locally": true,
+      "file_size": 1012,
+      "last_modified_utc": "2026-04-12T20:05:46.512Z",
+      "sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/timezone-utils.ts",
+      "exists_locally": true,
+      "file_size": 1140,
+      "last_modified_utc": "2026-04-12T13:07:09.082Z",
+      "sha256": "e4c456abef19ab9a68d0e02388028b1ed58d49b783c6757c1de6ab5a59b83ee2",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/types.ts",
+      "exists_locally": true,
+      "file_size": 7685,
+      "last_modified_utc": "2026-04-23T10:08:27.727Z",
+      "sha256": "723bf105c0beea6afed01e313fab0539bb4fb553cdbde0d6254eb94d6b7fed18",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/_shared/validators.ts",
+      "exists_locally": true,
+      "file_size": 1960,
+      "last_modified_utc": "2026-04-16T21:07:31.880Z",
+      "sha256": "b7eafa9a4d33e7ea4b61163980688a4bddd58e1224901c9fb8fe5775b6c5a1da",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/admin-reset-password/index.ts",
+      "exists_locally": true,
+      "file_size": 4375,
+      "last_modified_utc": "2026-04-12T13:07:09.082Z",
+      "sha256": "febd88c337265044cf97d81336db664292dcd8484fa29816a7107102f6da01ce",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/agent-test/index.ts",
+      "exists_locally": true,
+      "file_size": 9978,
+      "last_modified_utc": "2026-04-12T13:07:09.082Z",
+      "sha256": "7db9712f6a1bc1d25fee244025aec44bdfed88adbba3e4800370e73c00bf1ad4",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/booking-v2/index.ts",
+      "exists_locally": true,
+      "file_size": 84317,
+      "last_modified_utc": "2026-04-12T13:07:09.084Z",
+      "sha256": "07cebc2225227bbcb78bda7d8c263ef46c2966dc8dfcdf950576366991c201be",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/chat-ai-response/index.ts",
+      "exists_locally": true,
+      "file_size": 82483,
+      "last_modified_utc": "2026-04-23T18:44:08.129Z",
+      "sha256": "66e45a1cdb977d9e741807539b5150e10c40118fc46f7c6a3dd3873e782e5675",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/check-availability/index.ts",
+      "exists_locally": true,
+      "file_size": 9438,
+      "last_modified_utc": "2026-04-12T13:07:09.086Z",
+      "sha256": "1c3245badee51263c0b4b6350103fa74457bff04c8a137e87bf9105c7a5ac38c",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/close-conversation/index.ts",
+      "exists_locally": true,
+      "file_size": 2401,
+      "last_modified_utc": "2026-04-12T20:05:46.633Z",
+      "sha256": "b3a356da81804d919ad6c032e767616d7596bfb6eb3f98729d3987bb829abac1",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/close-idle-conversations/index.ts",
+      "exists_locally": true,
+      "file_size": 1690,
+      "last_modified_utc": "2026-04-12T20:05:46.672Z",
+      "sha256": "5a1f2994380787f698fa06e0352cdfb1ae497223aee40fe4578452c758c3455d",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/core-health-check/index.ts",
+      "exists_locally": true,
+      "file_size": 3701,
+      "last_modified_utc": "2026-04-12T13:07:09.089Z",
+      "sha256": "b21aa73d1fb1026e71b4cc15514b43d6b6ae7c7bb0bc0e08b46a161412c5206f",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/create-initial-admin/index.ts",
+      "exists_locally": true,
+      "file_size": 3915,
+      "last_modified_utc": "2026-04-12T13:07:09.089Z",
+      "sha256": "591f856676e2a55ad279d1b926dc8ecd35b2d9f26b3b9089b735efc4c107a608",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/create-user/index.ts",
+      "exists_locally": true,
+      "file_size": 3895,
+      "last_modified_utc": "2026-04-12T13:07:09.091Z",
+      "sha256": "b0ead2562385a66c6dae61b84c52e05afbe90e592392615ff4350c042b5f740b",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/external-actions/index.ts",
+      "exists_locally": true,
+      "file_size": 5444,
+      "last_modified_utc": "2026-04-12T13:07:09.091Z",
+      "sha256": "2cd8cbddeb631df745dc7f4eff7eb6b00b1f25cdeb26e97276651f96872caf68",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/manage-ai-provider/index.ts",
+      "exists_locally": true,
+      "file_size": 3557,
+      "last_modified_utc": "2026-04-12T13:07:09.091Z",
+      "sha256": "547869403fa8499d9312f0dbbb0246a2f7a9cc4fd9e48474ac5a9d2ba00f3460",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/operator-assistant/index.ts",
+      "exists_locally": true,
+      "file_size": 8110,
+      "last_modified_utc": "2026-04-12T13:07:09.093Z",
+      "sha256": "40d0728ae2ce3278749882a695b4ed1b077ec91e8bf284c446af10993015f8a5",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/public-chat/index.ts",
+      "exists_locally": true,
+      "file_size": 6504,
+      "last_modified_utc": "2026-04-18T23:01:51.912Z",
+      "sha256": "0f82206bdfad686f254f3ac02c0805b0f222b58fb20b1d0ae66a74a96c3cc7cd",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/send-credit-alert-email/index.ts",
+      "exists_locally": true,
+      "file_size": 14245,
+      "last_modified_utc": "2026-04-12T13:07:09.093Z",
+      "sha256": "bb132bfff584d55f270d3baac67f3b54608547e9d73757143a65c36b6d3c7178",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/send-follow-up-email/index.ts",
+      "exists_locally": true,
+      "file_size": 11322,
+      "last_modified_utc": "2026-04-12T13:07:09.095Z",
+      "sha256": "c7ddf6171db70a6c7893bd9ee186c5d94f11d1d4cdef3733bd3e7b4699a5f927",
+      "empty_file": false
+    },
+    {
+      "relative_path": "supabase/functions/test-ai-provider/index.ts",
+      "exists_locally": true,
+      "file_size": 5762,
+      "last_modified_utc": "2026-04-12T13:07:09.095Z",
+      "sha256": "6dc43b35fc440d8b848ae3c61bed0c59edd6cace9fcc34b9a99e5e1ac43371b4",
+      "empty_file": false
+    }
+  ],
+  "files_with_missing_relative_imports": [],
+  "remote_download_comparisons": [
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/action-types.ts",
+      "local_exists": true,
+      "local_sha256": "60d85f210182552b76399f9cbefd60168dbb6a3c5aed6e69494d852c4b219d53",
+      "remote_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_size": 448,
+      "remote_size": 0,
+      "hashes_match": false
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/availability-engine.ts",
+      "local_exists": true,
+      "local_sha256": "e5e104dfe46ac16b7b5a0da0245bbcdb1635bbe7ae4ae5e3368ddd84d6f98b81",
+      "remote_sha256": "e5e104dfe46ac16b7b5a0da0245bbcdb1635bbe7ae4ae5e3368ddd84d6f98b81",
+      "local_size": 10204,
+      "remote_size": 10204,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/booking-executor.ts",
+      "local_exists": true,
+      "local_sha256": "aa103f60279e7e94dcac7cb7e24c40c80c63d333de4faf7504e98bb6c35618d3",
+      "remote_sha256": "aa103f60279e7e94dcac7cb7e24c40c80c63d333de4faf7504e98bb6c35618d3",
+      "local_size": 8123,
+      "remote_size": 8123,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/booking-orchestrator.ts",
+      "local_exists": true,
+      "local_sha256": "44adb7830807c7ab02d8e4067f2b40f8e4a2e123665c4092f9d811c3cebbce06",
+      "remote_sha256": "44adb7830807c7ab02d8e4067f2b40f8e4a2e123665c4092f9d811c3cebbce06",
+      "local_size": 15685,
+      "remote_size": 15685,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/constants.ts",
+      "local_exists": true,
+      "local_sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "remote_sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "local_size": 8652,
+      "remote_size": 8652,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/context-manager.ts",
+      "local_exists": true,
+      "local_sha256": "7194040fc64b9ea1aa34bba0c7ad288bf6041e07482f29ac5e12d8a7e02f6b21",
+      "remote_sha256": "7194040fc64b9ea1aa34bba0c7ad288bf6041e07482f29ac5e12d8a7e02f6b21",
+      "local_size": 5004,
+      "remote_size": 5004,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/credit-manager.ts",
+      "local_exists": true,
+      "local_sha256": "63cdad285ffd7c2924e57d4bbbf6be676bd7b7672e2035d35fac9123b68c1082",
+      "remote_sha256": "63cdad285ffd7c2924e57d4bbbf6be676bd7b7672e2035d35fac9123b68c1082",
+      "local_size": 3999,
+      "remote_size": 3999,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/date-parser.ts",
+      "local_exists": true,
+      "local_sha256": "b5a0bf2225915388385e2eb1e1183e21eebcbb4fd3c3df4758b42ce63805a7f2",
+      "remote_sha256": "b5a0bf2225915388385e2eb1e1183e21eebcbb4fd3c3df4758b42ce63805a7f2",
+      "local_size": 5077,
+      "remote_size": 5077,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/decision-engine.ts",
+      "local_exists": true,
+      "local_sha256": "1aad10c04fe092d0e36008111d38846d1f8b4d03f6782100121a1349e273257c",
+      "remote_sha256": "1aad10c04fe092d0e36008111d38846d1f8b4d03f6782100121a1349e273257c",
+      "local_size": 15750,
+      "remote_size": 15750,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/decision-types.ts",
+      "local_exists": true,
+      "local_sha256": "9d16b13363b0e733fcadf100ffbeca7bf0d398f1e9efd7de46a2abdff71cf1a8",
+      "remote_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_size": 630,
+      "remote_size": 0,
+      "hashes_match": false
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/entity-extractor.ts",
+      "local_exists": true,
+      "local_sha256": "383c43b376ac01e7dd7baaa5aa478c85098f6a2291690bb550ec5601329311df",
+      "remote_sha256": "383c43b376ac01e7dd7baaa5aa478c85098f6a2291690bb550ec5601329311df",
+      "local_size": 4442,
+      "remote_size": 4442,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/error-handler.ts",
+      "local_exists": true,
+      "local_sha256": "12ce0ad9edea96f32917e466cb1721f0d554b7d245575db675852e087ab6baec",
+      "remote_sha256": "12ce0ad9edea96f32917e466cb1721f0d554b7d245575db675852e087ab6baec",
+      "local_size": 5944,
+      "remote_size": 5944,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/extraction-contract.ts",
+      "local_exists": true,
+      "local_sha256": "e27afdc440fbb924b44829252e6484ddc0e0649e9587fd54e2db7b36b42797f5",
+      "remote_sha256": "e27afdc440fbb924b44829252e6484ddc0e0649e9587fd54e2db7b36b42797f5",
+      "local_size": 10488,
+      "remote_size": 10488,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/guardrails.ts",
+      "local_exists": true,
+      "local_sha256": "8583ea598edcd7059ccad9998db1524007016a82e6d139c5765de04dd5e0666c",
+      "remote_sha256": "8583ea598edcd7059ccad9998db1524007016a82e6d139c5765de04dd5e0666c",
+      "local_size": 2612,
+      "remote_size": 2612,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/handoff-manager.ts",
+      "local_exists": true,
+      "local_sha256": "537604700ed3e4b5f2176d21831b00548288c9afb00d67ea222d79c6ed868e07",
+      "remote_sha256": "537604700ed3e4b5f2176d21831b00548288c9afb00d67ea222d79c6ed868e07",
+      "local_size": 1304,
+      "remote_size": 1304,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/knowledge-retriever.ts",
+      "local_exists": true,
+      "local_sha256": "f888de22ee622a5b17723cb15e2e353334820a14c3ad2a56015003a143100f91",
+      "remote_sha256": "f888de22ee622a5b17723cb15e2e353334820a14c3ad2a56015003a143100f91",
+      "local_size": 1951,
+      "remote_size": 1951,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/lead-manager.ts",
+      "local_exists": true,
+      "local_sha256": "a50c836556d7f560e223b6197ce813c107ce3bf664f38d09c19acdd37fa74782",
+      "remote_sha256": "a50c836556d7f560e223b6197ce813c107ce3bf664f38d09c19acdd37fa74782",
+      "local_size": 1334,
+      "remote_size": 1334,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/llm-provider.ts",
+      "local_exists": true,
+      "local_sha256": "27f2ae11d8b98e56be72df1fa678712fd7ec9f3465a7e1d24dbffcd21ae92915",
+      "remote_sha256": "27f2ae11d8b98e56be72df1fa678712fd7ec9f3465a7e1d24dbffcd21ae92915",
+      "local_size": 6449,
+      "remote_size": 6449,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/logger.ts",
+      "local_exists": true,
+      "local_sha256": "87a90081e71821dbcfb3770acfd9f68ce07a23caea302690dd96e9b1eaca5f8a",
+      "remote_sha256": "87a90081e71821dbcfb3770acfd9f68ce07a23caea302690dd96e9b1eaca5f8a",
+      "local_size": 1619,
+      "remote_size": 1619,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/reschedule-handler.ts",
+      "local_exists": true,
+      "local_sha256": "1d9a65246c7a0b5f433ee0a9814c7a85f7d7857069dd12463865e6a95ff44cf8",
+      "remote_sha256": "1d9a65246c7a0b5f433ee0a9814c7a85f7d7857069dd12463865e6a95ff44cf8",
+      "local_size": 4583,
+      "remote_size": 4583,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/response-directive.ts",
+      "local_exists": true,
+      "local_sha256": "931c3d6d9fa18ec5407637f72d094fe184871001f8fce6b6b466723d162bacee",
+      "remote_sha256": "931c3d6d9fa18ec5407637f72d094fe184871001f8fce6b6b466723d162bacee",
+      "local_size": 7042,
+      "remote_size": 7042,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/response-generator.ts",
+      "local_exists": true,
+      "local_sha256": "c8bfe06277fb7bd423b7897e498149d6ff44390d3c359e47fa0fced2e575f8c0",
+      "remote_sha256": "c8bfe06277fb7bd423b7897e498149d6ff44390d3c359e47fa0fced2e575f8c0",
+      "local_size": 3099,
+      "remote_size": 3099,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/service-resolver.ts",
+      "local_exists": true,
+      "local_sha256": "6548d0c95949503403f8378544a4b8e5bb1c0f7f715a7b5b87a4165f9ff613c0",
+      "remote_sha256": "6548d0c95949503403f8378544a4b8e5bb1c0f7f715a7b5b87a4165f9ff613c0",
+      "local_size": 4666,
+      "remote_size": 4666,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/state-machine.ts",
+      "local_exists": true,
+      "local_sha256": "633bf7e6c96795c9e46568a4a8e7f56c497334af757f7e60b17143cdedfd1958",
+      "remote_sha256": "633bf7e6c96795c9e46568a4a8e7f56c497334af757f7e60b17143cdedfd1958",
+      "local_size": 1103,
+      "remote_size": 1103,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/supabase-client.ts",
+      "local_exists": true,
+      "local_sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "remote_sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "local_size": 1012,
+      "remote_size": 1012,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/types.ts",
+      "local_exists": true,
+      "local_sha256": "723bf105c0beea6afed01e313fab0539bb4fb553cdbde0d6254eb94d6b7fed18",
+      "remote_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_size": 7685,
+      "remote_size": 0,
+      "hashes_match": false
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/_shared/validators.ts",
+      "local_exists": true,
+      "local_sha256": "b7eafa9a4d33e7ea4b61163980688a4bddd58e1224901c9fb8fe5775b6c5a1da",
+      "remote_sha256": "b7eafa9a4d33e7ea4b61163980688a4bddd58e1224901c9fb8fe5775b6c5a1da",
+      "local_size": 1960,
+      "remote_size": 1960,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-function-download",
+      "relative_path": "supabase/functions/chat-ai-response/index.ts",
+      "local_exists": true,
+      "local_sha256": "66e45a1cdb977d9e741807539b5150e10c40118fc46f7c6a3dd3873e782e5675",
+      "remote_sha256": "94790890df22ef9431b7966ed4b18c5743bf1d27d26ff386649776ef878a5f30",
+      "local_size": 82483,
+      "remote_size": 82487,
+      "hashes_match": false
+    },
+    {
+      "remote_root": "scripts/remote-download-public",
+      "relative_path": "supabase/functions/_shared/constants.ts",
+      "local_exists": true,
+      "local_sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "remote_sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "local_size": 8652,
+      "remote_size": 8652,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-public",
+      "relative_path": "supabase/functions/_shared/context-manager.ts",
+      "local_exists": true,
+      "local_sha256": "7194040fc64b9ea1aa34bba0c7ad288bf6041e07482f29ac5e12d8a7e02f6b21",
+      "remote_sha256": "7194040fc64b9ea1aa34bba0c7ad288bf6041e07482f29ac5e12d8a7e02f6b21",
+      "local_size": 5004,
+      "remote_size": 5004,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-public",
+      "relative_path": "supabase/functions/_shared/logger.ts",
+      "local_exists": true,
+      "local_sha256": "87a90081e71821dbcfb3770acfd9f68ce07a23caea302690dd96e9b1eaca5f8a",
+      "remote_sha256": "87a90081e71821dbcfb3770acfd9f68ce07a23caea302690dd96e9b1eaca5f8a",
+      "local_size": 1619,
+      "remote_size": 1619,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-public",
+      "relative_path": "supabase/functions/_shared/supabase-client.ts",
+      "local_exists": true,
+      "local_sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "remote_sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "local_size": 1012,
+      "remote_size": 1012,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-public",
+      "relative_path": "supabase/functions/_shared/types.ts",
+      "local_exists": true,
+      "local_sha256": "723bf105c0beea6afed01e313fab0539bb4fb553cdbde0d6254eb94d6b7fed18",
+      "remote_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_size": 7685,
+      "remote_size": 0,
+      "hashes_match": false
+    },
+    {
+      "remote_root": "scripts/remote-download-public",
+      "relative_path": "supabase/functions/public-chat/index.ts",
+      "local_exists": true,
+      "local_sha256": "0f82206bdfad686f254f3ac02c0805b0f222b58fb20b1d0ae66a74a96c3cc7cd",
+      "remote_sha256": "0f82206bdfad686f254f3ac02c0805b0f222b58fb20b1d0ae66a74a96c3cc7cd",
+      "local_size": 6504,
+      "remote_size": 6504,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-close-conversation",
+      "relative_path": "supabase/functions/_shared/constants.ts",
+      "local_exists": true,
+      "local_sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "remote_sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "local_size": 8652,
+      "remote_size": 8652,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-close-conversation",
+      "relative_path": "supabase/functions/_shared/context-manager.ts",
+      "local_exists": true,
+      "local_sha256": "7194040fc64b9ea1aa34bba0c7ad288bf6041e07482f29ac5e12d8a7e02f6b21",
+      "remote_sha256": "7194040fc64b9ea1aa34bba0c7ad288bf6041e07482f29ac5e12d8a7e02f6b21",
+      "local_size": 5004,
+      "remote_size": 5004,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-close-conversation",
+      "relative_path": "supabase/functions/_shared/lead-manager.ts",
+      "local_exists": true,
+      "local_sha256": "a50c836556d7f560e223b6197ce813c107ce3bf664f38d09c19acdd37fa74782",
+      "remote_sha256": "a50c836556d7f560e223b6197ce813c107ce3bf664f38d09c19acdd37fa74782",
+      "local_size": 1334,
+      "remote_size": 1334,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-close-conversation",
+      "relative_path": "supabase/functions/_shared/supabase-client.ts",
+      "local_exists": true,
+      "local_sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "remote_sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "local_size": 1012,
+      "remote_size": 1012,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-close-conversation",
+      "relative_path": "supabase/functions/_shared/types.ts",
+      "local_exists": true,
+      "local_sha256": "723bf105c0beea6afed01e313fab0539bb4fb553cdbde0d6254eb94d6b7fed18",
+      "remote_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_size": 7685,
+      "remote_size": 0,
+      "hashes_match": false
+    },
+    {
+      "remote_root": "scripts/remote-download-close-conversation",
+      "relative_path": "supabase/functions/close-conversation/index.ts",
+      "local_exists": true,
+      "local_sha256": "b3a356da81804d919ad6c032e767616d7596bfb6eb3f98729d3987bb829abac1",
+      "remote_sha256": "b3a356da81804d919ad6c032e767616d7596bfb6eb3f98729d3987bb829abac1",
+      "local_size": 2401,
+      "remote_size": 2401,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-close-idle",
+      "relative_path": "supabase/functions/_shared/constants.ts",
+      "local_exists": true,
+      "local_sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "remote_sha256": "f05c172a7d76dd317826e470a70cfaeb90838772d7bd74d568bab4c61d3cfba7",
+      "local_size": 8652,
+      "remote_size": 8652,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-close-idle",
+      "relative_path": "supabase/functions/_shared/supabase-client.ts",
+      "local_exists": true,
+      "local_sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "remote_sha256": "f861096d1e027cc2c0dfa6f34a68aa8b08a37be8ff439a5128855023e0e69643",
+      "local_size": 1012,
+      "remote_size": 1012,
+      "hashes_match": true
+    },
+    {
+      "remote_root": "scripts/remote-download-close-idle",
+      "relative_path": "supabase/functions/close-idle-conversations/index.ts",
+      "local_exists": true,
+      "local_sha256": "5a1f2994380787f698fa06e0352cdfb1ae497223aee40fe4578452c758c3455d",
+      "remote_sha256": "5a1f2994380787f698fa06e0352cdfb1ae497223aee40fe4578452c758c3455d",
+      "local_size": 1690,
+      "remote_size": 1690,
+      "hashes_match": true
+    }
+  ]
+}

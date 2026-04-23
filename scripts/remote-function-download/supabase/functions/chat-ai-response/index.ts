@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { getServiceClient } from '../_shared/supabase-client.ts';
-import { getContext, updateContext as persistContext } from '../_shared/context-manager.ts';
+import { getContext, updateContext } from '../_shared/context-manager.ts';
 import { callLLMSimple } from '../_shared/llm-provider.ts';
 import {
   EXTRACTION_SYSTEM_PROMPT,
@@ -26,107 +26,31 @@ import { createLeadIfEligible } from '../_shared/lead-manager.ts';
 import { checkCredits, consumeCredits } from '../_shared/credit-manager.ts';
 import { canTransition } from '../_shared/state-machine.ts';
 import { log } from '../_shared/logger.ts';
-import { ConversationContext, ConversationState, LLMExtraction, SchedulingService, SlotSuggestion } from '../_shared/types.ts';
+import { ConversationContext, LLMExtraction, SchedulingService, SlotSuggestion } from '../_shared/types.ts';
 import { decideNextAction } from '../_shared/decision-engine.ts';
-import type { ActionType } from '../_shared/action-types.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const OFFICIAL_RUNTIME_STATES = new Set<ConversationState>([
-  'idle',
+const ACTIVE_BOOKING_STATES = new Set([
   'collecting_service',
   'collecting_data',
-  'awaiting_slot_selection',
-  'awaiting_confirmation',
-  'booking_processing',
-  'completed',
-  'human_handoff',
-]);
-
-const ACTIVE_BOOKING_STATES = new Set<ConversationState>([
-  'collecting_service',
-  'collecting_data',
+  'collecting_date',
+  'collecting_personal_data',
   'awaiting_slot_selection',
   'awaiting_confirmation',
   'booking_processing',
 ]);
 
-const SERVICE_LOCK_GUARDED_STATES = new Set<ConversationState>([
+const SERVICE_LOCK_GUARDED_STATES = new Set([
   'collecting_data',
+  'collecting_date',
+  'collecting_personal_data',
   'awaiting_slot_selection',
   'awaiting_confirmation',
 ]);
-
-const SUPPORTED_DECISION_ACTIONS = new Set<ActionType>([
-  'HANDOFF',
-  'ANSWER_INFO',
-  'ASK_SERVICE',
-  'ASK_DATE',
-  'ASK_PERSONAL_DATA',
-  'GENERATE_SLOTS',
-  'SHOW_SLOTS',
-  'SELECT_SLOT',
-  'SLOT_SEARCH_BY_TIME',
-  'CONFIRM_BOOKING',
-  'CREATE_BOOKING',
-  'START_CANCEL',
-  'START_RESCHEDULE',
-  'EXECUTE_RESCHEDULE',
-]);
-
-const BOOKING_FLOW_DECISION_ACTIONS = new Set<ActionType>([
-  'ASK_SERVICE',
-  'ASK_DATE',
-  'ASK_PERSONAL_DATA',
-  'GENERATE_SLOTS',
-  'SHOW_SLOTS',
-  'SELECT_SLOT',
-  'SLOT_SEARCH_BY_TIME',
-  'CONFIRM_BOOKING',
-  'CREATE_BOOKING',
-  'EXECUTE_RESCHEDULE',
-]);
-
-type RuntimeContextUpdates = Partial<ConversationContext> & {
-  state?: ConversationState | string | null;
-};
-
-function normalizePersistedState(state: ConversationState | string | null | undefined): ConversationState | undefined {
-  if (typeof state !== 'string' || state.trim().length === 0) return undefined;
-
-  if (OFFICIAL_RUNTIME_STATES.has(state as ConversationState)) {
-    return state as ConversationState;
-  }
-
-  if (state.toLowerCase().includes('handoff')) {
-    return 'human_handoff';
-  }
-
-  // Phase 1: collapse unsupported booking pseudo-states into the supported data-collection state.
-  return 'collecting_data';
-}
-
-async function updateContext(
-  conversationId: string,
-  updates: RuntimeContextUpdates,
-  currentVersion: number
-): Promise<ConversationContext> {
-  const sanitizedUpdates: Partial<ConversationContext> = { ...updates };
-
-  if (Object.prototype.hasOwnProperty.call(updates, 'state')) {
-    const normalizedState = normalizePersistedState(updates.state);
-    if (normalizedState) {
-      sanitizedUpdates.state = normalizedState;
-    } else {
-      delete (sanitizedUpdates as Partial<ConversationContext> & { state?: unknown }).state;
-    }
-  }
-
-  return persistContext(conversationId, sanitizedUpdates, currentVersion);
-}
 
 // =============================================================================
 // HELPERS (extract time parts from slot ISO strings — single source of truth)
@@ -359,8 +283,11 @@ function shouldAcceptCustomerName(
   if (!hasPlausibleNameStructure(extraction.customer_name)) return false;
 
   const collectingPersonalData =
-    context.state === 'collecting_data' &&
-    (!context.customer_name || !context.customer_email || (requirePhone && !context.customer_phone));
+    context.state === 'collecting_personal_data' ||
+    (
+      context.state === 'collecting_data' &&
+      (!context.customer_name || !context.customer_email || (requirePhone && !context.customer_phone))
+    );
 
   const explicitName = hasExplicitNameSignal(userMessage);
   const personalDataSignal = hasPersonalDataSignal(extraction, userMessage);
@@ -723,7 +650,7 @@ serve(async (req) => {
     let emotionalContext: any = null;
     const lowerMsg = userMessage.toLowerCase();
     for (const [tone, keywords] of Object.entries(EMOTION_KEYWORDS)) {
-      const found = (keywords as readonly string[]).filter((kw) => lowerMsg.includes(kw));
+      const found = (keywords as string[]).filter((kw) => lowerMsg.includes(kw));
       if (found.length > 0) {
         emotionalContext = { tone, keywords: found, detected_by: 'deterministic' };
         break;
@@ -1058,8 +985,6 @@ serve(async (req) => {
     let reply = '';
     const isActiveBookingState = ACTIVE_BOOKING_STATES.has(updatedContext.state);
     const allowLegacyIntentRouting = !isActiveBookingState;
-    const decisionActionSupported = SUPPORTED_DECISION_ACTIONS.has(decision.action);
-    const isDecisionBookingAction = BOOKING_FLOW_DECISION_ACTIONS.has(decision.action);
 
     const processTimeBasedSlotSearch = async (source: 'decision' | 'legacy_state') => {
       logFlow('[FLOW_BRANCH]', {
@@ -1193,13 +1118,12 @@ serve(async (req) => {
 
       const result = await executeReschedule(updatedContext, empresaId, agentId, conversationId);
       if (result.success) {
-        const confirmedSlot = updatedContext.selected_slot!;
         const snapshot = {
           service_id: updatedContext.service_id!,
           service_name: updatedContext.service_name!,
-          start: confirmedSlot.start,
-          end: confirmedSlot.end,
-          resource_id: confirmedSlot.resource_id,
+          start: updatedContext.selected_slot.start,
+          end: updatedContext.selected_slot.end,
+          resource_id: updatedContext.selected_slot.resource_id,
           customer_name: updatedContext.customer_name!,
           customer_email: updatedContext.customer_email!,
           customer_phone: updatedContext.customer_phone ?? null,
@@ -1400,20 +1324,7 @@ serve(async (req) => {
     };
 
     // --- 9a. INFO_REQUEST → knowledge base, no state change ---
-    if (!decisionActionSupported) {
-      logFlow('[FLOW_BRANCH]', {
-        conversation_id: conversationId,
-        branch: 'UNSUPPORTED_DECISION_ACTION',
-        source: 'legacy_fallback_unexpected',
-        state: updatedContext.state ?? null,
-        action: decision.action ?? null,
-      });
-
-      reply = isActiveBookingState
-        ? 'Pode dizer se quer escolher outro horario, confirmar a marcacao ou indicar os dados em falta?'
-        : 'Pode reformular o pedido? Posso ajudar a marcar, remarcar, cancelar ou esclarecer uma duvida.';
-
-    } else if (
+    if (
       (decision.action === 'ANSWER_INFO' && !isActiveBookingState) ||
       (
         allowLegacyIntentRouting &&
@@ -1426,7 +1337,7 @@ serve(async (req) => {
       logFlow('[FLOW_BRANCH]', {
         conversation_id: conversationId,
         branch: 'ANSWER_INFO',
-        source: decision.action === 'ANSWER_INFO' ? 'decision' : 'legacy_non_active_only',
+        source: decision.action === 'ANSWER_INFO' ? 'decision' : 'legacy_intent',
         state: updatedContext.state ?? null,
       });
 
@@ -1461,7 +1372,7 @@ serve(async (req) => {
       logFlow('[FLOW_BRANCH]', {
         conversation_id: conversationId,
         branch: 'START_CANCEL',
-        source: decision.action === 'START_CANCEL' ? 'decision' : 'legacy_non_active_only',
+        source: decision.action === 'START_CANCEL' ? 'decision' : 'legacy_intent',
         state: updatedContext.state ?? null,
       });
 
@@ -1476,7 +1387,7 @@ serve(async (req) => {
       logFlow('[FLOW_BRANCH]', {
         conversation_id: conversationId,
         branch: 'START_RESCHEDULE',
-        source: decision.action === 'START_RESCHEDULE' ? 'decision' : 'legacy_non_active_only',
+        source: decision.action === 'START_RESCHEDULE' ? 'decision' : 'legacy_intent',
         state: updatedContext.state ?? null,
       });
 
@@ -1506,7 +1417,6 @@ serve(async (req) => {
 
     // --- 9d. BOOKING FLOW (state-driven, ALL branches use updatedContext.state) ---
     } else if (
-      isDecisionBookingAction ||
       intent === 'BOOKING_NEW' ||
       intent === 'TIME_BASED_SELECTION' ||
       isActiveBookingState
@@ -1632,9 +1542,7 @@ serve(async (req) => {
           state: updatedContext.state ?? null,
         });
 
-        const bookingFlowIntent: 'RESCHEDULE' | 'BOOKING_NEW' = updatedContext.reschedule_from_agendamento_id
-          ? 'RESCHEDULE'
-          : 'BOOKING_NEW';
+        const bookingFlowIntent = updatedContext.reschedule_from_agendamento_id ? 'RESCHEDULE' : 'BOOKING_NEW';
         const orchestrationContext = {
           ...updatedContext,
           state: 'collecting_data' as const,
@@ -1814,46 +1722,25 @@ serve(async (req) => {
           reply = 'Para remarcar, preciso que escolha primeiro o novo horario.';
         }
 
-      } else if (isActiveBookingState && decisionActionSupported) {
-        logFlow('[FLOW_BRANCH]', {
-          conversation_id: conversationId,
-          branch: 'ACTIVE_DECISION_SAFE_FALLBACK',
-          source: 'legacy_fallback_unexpected',
-          state: updatedContext.state ?? null,
-          action: decision.action ?? null,
-        });
-
-        reply = updatedContext.available_slots.length > 0
-          ? 'Pode indicar o numero do horario que prefere, dizer outro horario ou confirmar a marcacao.'
-          : 'Pode dizer qual o servico, data ou dados que pretende ajustar para eu continuar?';
-
       // === 9d.1 awaiting_confirmation ===
       } else if (updatedContext.state === 'awaiting_confirmation') {
         logFlow('[FLOW_BRANCH]', {
           conversation_id: conversationId,
-          branch: 'ACTIVE_LEGACY_BLOCKED',
-          source: 'legacy_fallback_unexpected',
+          branch: 'LEGACY_AWAITING_CONFIRMATION',
+          source: 'legacy_state',
           state: updatedContext.state ?? null,
-          action: decision.action ?? null,
-          blocked_branch: 'awaiting_confirmation',
         });
 
-        reply = updatedContext.selected_slot
-          ? 'Pode responder "sim" para confirmar, indicar o numero do horario ou dizer outro horario.'
-          : 'Preciso que confirme ou indique o horario pretendido para continuar.';
-
-        if (false) {
         // ---- Confirmation accepted ----
         if (/\b(sim|confirmo|confirmar|ok|certo|correto|exato|perfeito|yes)\b/i.test(userMessage)) {
           logFlow('[FLOW_BRANCH]', {
             conversation_id: conversationId,
             branch: 'CREATE_BOOKING',
-            source: 'legacy_fallback_unexpected',
+            source: 'legacy_confirmation',
             state: updatedContext.state ?? null,
-            action: decision.action ?? null,
           });
 
-          // Phase 1 / Sprint 3: blocked legacy confirmation path; booking creation must come from decision.action.
+          await processCreateBooking('legacy_confirmation');
 
         } else {
           // ---- Not a confirmation: might be a time change, data change, or unclear ----
@@ -1861,7 +1748,7 @@ serve(async (req) => {
           const isTimeRequest = timeOnlyPattern.test(userMessage) && extraction.intent !== 'CANCEL';
 
           if (isTimeRequest && extraction.time_parsed && updatedContext.available_slots.length > 0) {
-            // Phase 1 / Sprint 3: blocked legacy time-change path; slot change must come from decision.action.
+            await processTimeBasedSlotSearch('legacy_state');
           } else if (isTimeRequest && updatedContext.available_slots.length > 0) {
             const currentDate = extractDate(updatedContext.selected_slot) ?? updatedContext.preferred_date;
             const selectionContext = keepCurrentDateOnTimeOnlyChange && currentDate
@@ -1877,11 +1764,11 @@ serve(async (req) => {
               selectedSlot?.start ?? null,
               selectionContext.available_slots.length
             );
-            if (selectedSlot !== null) {
+            if (selectedSlot) {
               // New time matched existing slot → update selection, stay in confirmation
               updatedContext = await updateContext(
                 conversationId,
-                buildSlotSelectionUpdates(updatedContext, selectedSlot!, 'awaiting_confirmation'),
+                buildSlotSelectionUpdates(updatedContext, selectedSlot, 'awaiting_confirmation'),
                 updatedContext.context_version
               );
               reply = HARDCODED_TEMPLATES.awaiting_confirmation(buildConfirmedSnapshot(updatedContext, selectedSlot));
@@ -1903,8 +1790,8 @@ serve(async (req) => {
             const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
             updatedContext = await updateContext(conversationId, orchestration.context_updates, updatedContext.context_version);
             const slotReply = buildOrchestrationSlotsReply(orchestration.action, orchestration.slots ?? null);
-            if (slotReply !== null) {
-              reply = slotReply!;
+            if (slotReply) {
+              reply = slotReply;
             } else {
               reply = await generateResponse(
                 userMessage,
@@ -1917,24 +1804,16 @@ serve(async (req) => {
             }
           }
         }
-        }
 
       // === 9d.2 awaiting_slot_selection ===
       } else if (updatedContext.state === 'awaiting_slot_selection') {
         logFlow('[FLOW_BRANCH]', {
           conversation_id: conversationId,
-          branch: 'ACTIVE_LEGACY_BLOCKED',
-          source: 'legacy_fallback_unexpected',
+          branch: 'LEGACY_AWAITING_SLOT_SELECTION',
+          source: 'legacy_state',
           state: updatedContext.state ?? null,
-          action: decision.action ?? null,
-          blocked_branch: 'awaiting_slot_selection',
         });
 
-        reply = updatedContext.available_slots.length > 0
-          ? 'Pode indicar o numero do horario que prefere ou dizer outro horario.'
-          : 'Preciso que escolha um dos horarios disponiveis para continuar.';
-
-        if (false) {
         const selectionResult = resolveSlotSelectionFromContext(updatedContext, userMessage);
         const selectedSlot = selectionResult.slot;
         logSlotSelectionDebug(
@@ -1942,12 +1821,12 @@ serve(async (req) => {
           selectedSlot?.start ?? null,
           updatedContext.available_slots.length
         );
-        if (selectedSlot !== null) {
+        if (selectedSlot) {
           const missingPersonal = !updatedContext.customer_name || !updatedContext.customer_email;
           if (missingPersonal) {
             updatedContext = await updateContext(
               conversationId,
-              buildSlotSelectionUpdates(updatedContext, selectedSlot!, 'collecting_data'),
+              buildSlotSelectionUpdates(updatedContext, selectedSlot, 'collecting_data'),
               updatedContext.context_version
             );
             const missingFields: string[] = [];
@@ -1976,7 +1855,7 @@ serve(async (req) => {
           } else {
             updatedContext = await updateContext(
               conversationId,
-              buildSlotSelectionUpdates(updatedContext, selectedSlot!, 'awaiting_confirmation'),
+              buildSlotSelectionUpdates(updatedContext, selectedSlot, 'awaiting_confirmation'),
               updatedContext.context_version
             );
             reply = HARDCODED_TEMPLATES.awaiting_confirmation(buildConfirmedSnapshot(updatedContext, selectedSlot));
@@ -1991,23 +1870,15 @@ serve(async (req) => {
         }
 
       // === 9d.3 collecting_service (SINGLE BRANCH — BUG FIX #4) ===
-        }
       } else if (updatedContext.state === 'collecting_service') {
         logFlow('[FLOW_BRANCH]', {
           conversation_id: conversationId,
-          branch: 'ACTIVE_LEGACY_BLOCKED',
-          source: 'legacy_fallback_unexpected',
+          branch: 'LEGACY_COLLECTING_SERVICE',
+          source: 'legacy_state',
           state: updatedContext.state ?? null,
-          action: decision.action ?? null,
-          blocked_branch: 'collecting_service',
         });
 
-        if (true) {
-          // Phase 1 / Sprint 4: collecting_service must be driven by decision.action only.
-          reply = updatedContext.service_id
-            ? 'Ja tenho o servico. Pode indicar a data pretendida para continuar.'
-            : 'Preciso que indique o servico pretendido para continuar.';
-        } else if (updatedContext.service_id) {
+        if (updatedContext.service_id) {
           // Service resolved this turn → advance to orchestrator (will go to collecting_data or slots)
           const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
           updatedContext = await updateContext(conversationId, {
@@ -2015,8 +1886,8 @@ serve(async (req) => {
             current_intent: 'BOOKING_NEW',
           }, updatedContext.context_version);
           const slotReply = buildOrchestrationSlotsReply(orchestration.action, orchestration.slots ?? null);
-          if (slotReply !== null) {
-            reply = slotReply!;
+          if (slotReply) {
+            reply = slotReply;
           } else {
             reply = await generateResponse(
               userMessage,
@@ -2108,20 +1979,12 @@ serve(async (req) => {
           // collecting_data — run orchestration to decide availability vs. ask more data
           logFlow('[FLOW_BRANCH]', {
             conversation_id: conversationId,
-            branch: 'ACTIVE_LEGACY_BLOCKED',
-            source: 'legacy_fallback_unexpected',
+            branch: 'LEGACY_COLLECTING_DATA',
+            source: 'legacy_state',
             state: updatedContext.state ?? null,
-            action: decision.action ?? null,
-            blocked_branch: 'collecting_data',
           });
 
-          if (true) {
-            // Phase 1 / Sprint 4: collecting_data must be driven by decision.action only.
-            reply = updatedContext.available_slots.length > 0
-              ? 'Pode indicar o numero do horario que prefere ou dizer outro horario.'
-              : 'Pode indicar a data pretendida ou os dados em falta para continuar.';
-          } else {
-            const preOrchestrationContext = {
+          const preOrchestrationContext = {
             ...updatedContext,
             state: 'collecting_data' as const,
             current_intent: 'BOOKING_NEW' as const,
@@ -2143,8 +2006,8 @@ serve(async (req) => {
             hasSlots ? (orchestration.slots ?? null) : null
           );
 
-          if (slotReply !== null) {
-            reply = slotReply!;
+          if (slotReply) {
+            reply = slotReply;
           } else {
             reply = await generateResponse(
               userMessage,
@@ -2155,7 +2018,6 @@ serve(async (req) => {
               empresaId,
             );
           }
-          }
         }
       }
 
@@ -2163,42 +2025,33 @@ serve(async (req) => {
     } else {
       logFlow('[FLOW_BRANCH]', {
         conversation_id: conversationId,
-        branch: 'ACTIVE_LEGACY_BLOCKED',
-        source: 'legacy_fallback_unexpected',
+        branch: 'GENERIC_FALLBACK',
+        source: 'legacy_fallback',
         state: updatedContext.state ?? null,
-        action: decision.action ?? null,
-        blocked_branch: 'generic_fallback',
       });
 
-      if (true) {
-        // Phase 1 / Sprint 4: generic fallback must never start or mutate booking flow.
-        reply = updatedContext.state === 'idle'
-          ? 'Pode dizer se quer marcar, remarcar, cancelar ou esclarecer uma duvida.'
-          : 'Nao consegui determinar o proximo passo com seguranca. Pode reformular o que pretende fazer?';
+      const nextState = updatedContext.service_id ? 'collecting_data' : 'collecting_service';
+      updatedContext = await updateContext(conversationId, {
+        state: nextState,
+        current_intent: 'BOOKING_NEW',
+      }, updatedContext.context_version);
+      const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
+      updatedContext = await updateContext(conversationId, {
+        ...orchestration.context_updates,
+        current_intent: 'BOOKING_NEW',
+      }, updatedContext.context_version);
+      const slotReply = buildOrchestrationSlotsReply(orchestration.action, orchestration.slots ?? null);
+      if (slotReply) {
+        reply = slotReply;
       } else {
-        const nextState = updatedContext.service_id ? 'collecting_data' : 'collecting_service';
-        updatedContext = await updateContext(conversationId, {
-          state: nextState,
-          current_intent: 'BOOKING_NEW',
-        }, updatedContext.context_version);
-        const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
-        updatedContext = await updateContext(conversationId, {
-          ...orchestration.context_updates,
-          current_intent: 'BOOKING_NEW',
-        }, updatedContext.context_version);
-        const slotReply = buildOrchestrationSlotsReply(orchestration.action, orchestration.slots ?? null);
-        if (slotReply !== null) {
-          reply = slotReply!;
-        } else {
-          reply = await generateResponse(
-            userMessage,
-            updatedContext,
-            orchestration.response_hint,
-            orchestration.slots ?? null,
-            agentCtx,
-            empresaId,
-          );
-        }
+        reply = await generateResponse(
+          userMessage,
+          updatedContext,
+          orchestration.response_hint,
+          orchestration.slots ?? null,
+          agentCtx,
+          empresaId,
+        );
       }
     }
 

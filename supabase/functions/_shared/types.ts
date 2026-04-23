@@ -2,7 +2,6 @@ export type ConversationState =
   | 'idle'
   | 'collecting_service'
   | 'collecting_data'
-  | 'checking_availability'
   | 'awaiting_slot_selection'
   | 'awaiting_confirmation'
   | 'booking_processing'
@@ -39,7 +38,8 @@ export interface ConfirmedSnapshot {
 export interface ConversationContext {
   state: ConversationState;
   previous_state: ConversationState | null;
-  current_intent: Intent | null;
+  // Phase 1: persist the richer runtime intent surface without unsafe casts.
+  current_intent: Intent | ExtractedIntent | null;
   service_id: string | null;
   service_name: string | null;
   service_source: string | null;
@@ -77,6 +77,7 @@ export interface SchedulingService {
   empresa_id: string;
   name: string;
   description: string | null;
+  priority?: number | null;
   duration_minutes: number;
   buffer_before_minutes: number;
   buffer_after_minutes: number;

@@ -1,5 +1,3 @@
-import type { ConversationState } from './types.ts';
-
 export const CREDIT_COSTS = {
   message: 1,
   booking_create: 5,
@@ -43,28 +41,34 @@ export const BOOKING_STATES_THAT_ALLOW_CHANGES = [
   'collecting_data',
   'awaiting_slot_selection',
   'awaiting_confirmation',
-] as const satisfies readonly ConversationState[];
+] as const;
 
 export const CONVERSATION_TIMEZONE_DEFAULT = 'Europe/Lisbon';
 
 // ─── State Machine ──────────────────────────────────────────────────────────
 
-// Phase 1: transition validation only recognizes the official runtime states.
 export const VALID_TRANSITIONS = {
-  'idle': ['collecting_service', 'collecting_data', 'human_handoff'],
+  'idle': ['collecting_service', 'human_handoff'],
   'collecting_service': [
     'collecting_data',
-    'awaiting_slot_selection',
+    'checking_availability',
+    'idle',
     'human_handoff',
   ],
   'collecting_data': [
+    'checking_availability',
     'collecting_service',
+    'human_handoff',
+  ],
+  'checking_availability': [
     'awaiting_slot_selection',
     'awaiting_confirmation',
-    'human_handoff',
+    'collecting_data',
   ],
   'awaiting_slot_selection': [
     'awaiting_confirmation',
+    'checking_availability',
+    'collecting_service',
     'collecting_data',
     'human_handoff',
   ],
@@ -72,17 +76,17 @@ export const VALID_TRANSITIONS = {
     'booking_processing',
     'collecting_data',
     'awaiting_slot_selection',
+    'collecting_service',
     'human_handoff',
   ],
   'booking_processing': [
     'completed',
     'awaiting_slot_selection',
     'collecting_data',
-    'human_handoff',
   ],
-  'completed': ['collecting_data', 'human_handoff'],
+  'completed': ['idle', 'human_handoff'],
   'human_handoff': [],
-} as const satisfies Record<ConversationState, readonly ConversationState[]>;
+} as const;
 
 // ─── Response Directive ─────────────────────────────────────────────────────
 
@@ -90,23 +94,25 @@ export const CREATIVE_FREEDOM_BY_STATE = {
   'idle': 'high',
   'collecting_service': 'medium',
   'collecting_data': 'low',
+  'checking_availability': 'none',
   'awaiting_slot_selection': 'low',
   'awaiting_confirmation': 'none',
   'booking_processing': 'none',
   'completed': 'high',
   'human_handoff': 'low',
-} as const satisfies Record<ConversationState, 'none' | 'low' | 'medium' | 'high'>;
+} as const;
 
 export const MAX_SENTENCES_BY_STATE = {
   'idle': 4,
   'collecting_service': 4,
   'collecting_data': 3,
+  'checking_availability': 0,
   'awaiting_slot_selection': 6,
   'awaiting_confirmation': 3,
   'booking_processing': 0,
   'completed': 4,
   'human_handoff': 3,
-} as const satisfies Record<ConversationState, number>;
+} as const;
 
 // ─── Emotion Detection ──────────────────────────────────────────────────────
 

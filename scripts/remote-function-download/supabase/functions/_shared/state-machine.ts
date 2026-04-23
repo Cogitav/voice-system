@@ -8,7 +8,7 @@ export interface TransitionResult {
 }
 
 export function transition(current: ConversationState, next: ConversationState): TransitionResult {
-  const allowed: readonly ConversationState[] = VALID_TRANSITIONS[current] ?? [];
+  const allowed = VALID_TRANSITIONS[current] ?? [];
   if (allowed.includes(next)) {
     return { valid: true, next_state: next, reason: null };
   }
@@ -20,13 +20,11 @@ export function transition(current: ConversationState, next: ConversationState):
 }
 
 export function canTransition(current: ConversationState, next: ConversationState): boolean {
-  const allowed: readonly ConversationState[] = VALID_TRANSITIONS[current] ?? [];
-  return allowed.includes(next);
+  return (VALID_TRANSITIONS[current] ?? []).includes(next);
 }
 
 export function getAllowedTransitions(current: ConversationState): ConversationState[] {
-  const allowed: readonly ConversationState[] = VALID_TRANSITIONS[current] ?? [];
-  return [...allowed];
+  return VALID_TRANSITIONS[current] ?? [];
 }
 
 export function isTerminalState(state: ConversationState): boolean {

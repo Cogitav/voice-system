@@ -5,8 +5,10 @@ import {
 } from './decision-types.ts';
 import { ConversationContext, ConversationState, LLMExtraction } from './types.ts';
 
-const ACTIVE_BOOKING_STATES = new Set<ConversationState>([
+const ACTIVE_BOOKING_STATES = new Set<string>([
   'collecting_service',
+  'collecting_date',
+  'collecting_personal_data',
   'collecting_data',
   'awaiting_slot_selection',
   'awaiting_confirmation',
@@ -85,7 +87,7 @@ function shouldHandoff(context: ConversationContext, extraction: LLMExtraction):
 }
 
 function isActiveBookingState(state: ConversationState | string): boolean {
-  return ACTIVE_BOOKING_STATES.has(state as ConversationState);
+  return ACTIVE_BOOKING_STATES.has(String(state));
 }
 
 function hasSoftServiceSignal(extraction: LLMExtraction): boolean {
@@ -211,36 +213,6 @@ function buildDecision(
   };
 }
 
-function buildCompletedBookingRestartDecision(context: ConversationContext): DecisionEngineOutput {
-  if (hasService(context)) {
-    return buildDecision(
-      'ASK_DATE',
-      // Phase 1: replace the removed restart action with the nearest supported collecting state.
-      'collecting_data',
-      0.95,
-      'Completed conversation is re-entering booking flow with service context already available'
-    );
-  }
-
-  return buildDecision(
-    'ASK_SERVICE',
-    // Phase 1: replace the removed restart action with a supported service collection step.
-    'collecting_service',
-    0.95,
-    'Completed conversation is re-entering booking flow and needs a service first'
-  );
-}
-
-function hasCompletedFlowReentrySignal(extraction: LLMExtraction): boolean {
-  return Boolean(
-    extraction.service_id ||
-    extraction.date_parsed ||
-    extraction.time_parsed ||
-    extraction.relative_time_direction ||
-    hasSoftServiceSignal(extraction)
-  );
-}
-
 function decideFromActiveBookingState(
   context: ConversationContext,
   extraction: LLMExtraction,
@@ -267,7 +239,7 @@ function decideFromActiveBookingState(
   }
 
   if (
-    state === 'collecting_data' &&
+    (state === 'collecting_date' || state === 'collecting_data') &&
     hasService(context) &&
     !hasDate(context)
   ) {
@@ -280,15 +252,14 @@ function decideFromActiveBookingState(
   }
 
   if (
-    state === 'collecting_data' &&
+    (state === 'collecting_personal_data' || state === 'collecting_data') &&
     hasService(context) &&
     hasDate(context) &&
     (missingPersonal.length > 0 || missingReason)
   ) {
     return buildDecision(
       'ASK_PERSONAL_DATA',
-      // Phase 1: collapse the dedicated personal-data pseudo-state into the supported data-collection state.
-      'collecting_data',
+      'collecting_personal_data',
       0.96,
       'Active personal data collection state: continue collecting required booking data',
       { missing_fields: missingReason ? [...missingPersonal, 'customer_reason'] : missingPersonal }
@@ -357,8 +328,7 @@ function decideFromActiveBookingState(
     if (missingPersonal.length > 0) {
       return buildDecision(
         'ASK_PERSONAL_DATA',
-        // Phase 1: collapse the dedicated personal-data pseudo-state into the supported data-collection state.
-        'collecting_data',
+        'collecting_personal_data',
         0.96,
         'Active awaiting_confirmation state: required personal data is still missing',
         { missing_fields: missingPersonal }
@@ -368,8 +338,7 @@ function decideFromActiveBookingState(
     if (missingReason) {
       return buildDecision(
         'ASK_PERSONAL_DATA',
-        // Phase 1: collapse the dedicated personal-data pseudo-state into the supported data-collection state.
-        'collecting_data',
+        'collecting_personal_data',
         0.84,
         'Active awaiting_confirmation state: required booking reason is still missing',
         { missing_fields: ['customer_reason'] }
@@ -395,8 +364,7 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
   if (shouldHandoff(context, extraction)) {
     return buildDecision(
       'HANDOFF',
-      // Phase 1: normalize to the persisted human handoff state.
-      'human_handoff',
+      'handoff',
       1,
       'Human requested or system error threshold reached'
     );
@@ -405,8 +373,7 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
   if (shouldStartCancel(extraction)) {
     return buildDecision(
       'START_CANCEL',
-      // Phase 1: normalize cancel entry into the supported data-collection state.
-      'collecting_data',
+      'cancel_collecting_target',
       0.98,
       'User requested cancellation'
     );
@@ -415,8 +382,7 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
   if (shouldStartReschedule(extraction)) {
     return buildDecision(
       'START_RESCHEDULE',
-      // Phase 1: normalize reschedule entry into the supported data-collection state.
-      'collecting_data',
+      'reschedule_collecting_target',
       0.98,
       'User requested reschedule'
     );
@@ -424,7 +390,12 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
 
   if (isCompletedState(context.state)) {
     if (extraction.intent === 'BOOKING_NEW') {
-      return buildCompletedBookingRestartDecision(context);
+      return buildDecision(
+        'RESET_FLOW',
+        'idle',
+        0.95,
+        'Completed conversation received a new booking intent'
+      );
     }
 
     if (extraction.intent === 'INFO_REQUEST') {
@@ -442,20 +413,11 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
       extraction.intent === 'DATE_CHANGE' ||
       extraction.intent === 'CONFIRMATION'
     ) {
-      if (hasCompletedFlowReentrySignal(extraction)) {
-        return buildDecision(
-          'ASK_SERVICE',
-          'collecting_service',
-          0.7,
-          'Phase 1 collapse: ambiguous completed follow-up with booking signals should restart from service collection'
-        );
-      }
-
       return buildDecision(
-        'ANSWER_INFO',
+        'ASK_CLARIFICATION',
         'completed',
         0.65,
-        'Phase 1 collapse: ambiguous completed follow-up without booking signals is treated as informational'
+        'Completed conversation received ambiguous follow-up'
       );
     }
   }
@@ -528,8 +490,7 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
     if (missingPersonalForSelectedSlot.length > 0) {
       return buildDecision(
         'ASK_PERSONAL_DATA',
-        // Phase 1: collapse the dedicated personal-data pseudo-state into the supported data-collection state.
-        'collecting_data',
+        'collecting_personal_data',
         0.95,
         'Selected slot exists but required personal data is missing',
         { missing_fields: missingPersonalForSelectedSlot }
@@ -539,8 +500,7 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
     if (needsReason(context, config.requireReason)) {
       return buildDecision(
         'ASK_PERSONAL_DATA',
-        // Phase 1: collapse the dedicated personal-data pseudo-state into the supported data-collection state.
-        'collecting_data',
+        'collecting_personal_data',
         0.82,
         'Selected slot exists but required booking reason is missing',
         { missing_fields: ['customer_reason'] }
@@ -569,8 +529,7 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
   if (!hasDate(context)) {
     return buildDecision(
       'ASK_DATE',
-      // Phase 1: collapse the dedicated date pseudo-state into the supported data-collection state.
-      'collecting_data',
+      'collecting_date',
       0.95,
       'Missing preferred_date in booking flow'
     );
@@ -580,8 +539,7 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
   if (missingPersonal.length > 0) {
     return buildDecision(
       'ASK_PERSONAL_DATA',
-      // Phase 1: collapse the dedicated personal-data pseudo-state into the supported data-collection state.
-      'collecting_data',
+      'collecting_personal_data',
       0.95,
       'Missing required personal data',
       { missing_fields: missingPersonal }
@@ -591,8 +549,7 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
   if (needsReason(context, config.requireReason)) {
     return buildDecision(
       'ASK_PERSONAL_DATA',
-      // Phase 1: collapse the dedicated personal-data pseudo-state into the supported data-collection state.
-      'collecting_data',
+      'collecting_personal_data',
       0.82,
       'Missing required booking reason',
       { missing_fields: ['customer_reason'] }

@@ -183,6 +183,7 @@ export function getHardcodedResponse(
       return HARDCODED_TEMPLATES.awaiting_confirmation(confirmedData);
     case 'completed':
       return HARDCODED_TEMPLATES.booking_confirmed(confirmedData);
+    case 'checking_availability':
     case 'booking_processing':
       return null; // silent states — no user-visible response
     default:

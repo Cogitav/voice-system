@@ -127,7 +127,7 @@ export function resetPartialContext(
   correctionType: CorrectionType
 ): ConversationContext {
   const rules = CONTEXT_RESET_RULES[correctionType];
-  if ((rules.clear as readonly string[]).includes('ALL')) {
+  if (rules.clear.includes('ALL')) {
     return {
       ...createEmptyContext(),
       language: context.language,

@@ -4,6 +4,7 @@ import { ConversationContext, ConversationState, LLMExtraction } from './types.t
 export interface DecisionEngineConfig {
   requirePhone: boolean;
   requireReason: boolean;
+  // Passed by the live router today even though the decision engine does not use them yet.
   allowSameDayBooking?: boolean;
   minimumAdvanceMinutes?: number;
 }
