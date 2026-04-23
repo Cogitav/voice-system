@@ -32,16 +32,83 @@ export async function executeBooking(
     return { success: true, agendamento_id: existing.id, error: null, error_code: null };
   }
 
-  // Race condition guard — double check availability
+  const slotTime = slot.start.match(/T(\d{2}:\d{2})/)?.[1];
+  const bookingQueryFilters = {
+    empresa_id: empresaId,
+    date: slot.start.slice(0, 10),
+    start_gte: slot.start.slice(0, 10) + 'T00:00:00Z',
+    start_lt: slot.start.slice(0, 10) + 'T23:59:59Z',
+    excluded_estado: 'cancelado',
+    excluded_scheduling_state: 'cancelled',
+    preferred_time: slotTime ?? null,
+  };
+
+  const { data: conflictRows } = await db
+    .from('agendamentos')
+    .select('id, start_datetime, end_datetime, resource_id, estado, scheduling_state')
+    .eq('empresa_id', empresaId)
+    .gte('start_datetime', bookingQueryFilters.start_gte)
+    .lt('start_datetime', bookingQueryFilters.start_lt)
+    .not('estado', 'eq', bookingQueryFilters.excluded_estado)
+    .not('scheduling_state', 'eq', bookingQueryFilters.excluded_scheduling_state);
+
+  const overlappingConflictRows = (conflictRows ?? []).filter((booking) => {
+    const bookingStart = new Date(booking.start_datetime).getTime();
+    const bookingEnd = new Date(booking.end_datetime).getTime();
+    const slotStart = new Date(slot.start).getTime();
+    const slotEnd = new Date(slot.end).getTime();
+    return slotStart < bookingEnd && slotEnd > bookingStart;
+  });
+
+  console.log('[FLOW_DEBUG_BOOKING_CONFLICT_CHECK]', JSON.stringify({
+    stage: 'before_recheck',
+    start: slot.start,
+    end: slot.end,
+    resource_id: slot.resource_id ?? null,
+    timezone: 'Europe/Lisbon',
+    query_filters: bookingQueryFilters,
+    conflicting_rows: overlappingConflictRows.map((booking) => ({
+      id: booking.id,
+      start: booking.start_datetime,
+      end: booking.end_datetime,
+      resource_id: booking.resource_id,
+      estado: booking.estado ?? null,
+      scheduling_state: booking.scheduling_state ?? null,
+    })),
+  }));
+
+  // Race condition guard — double check availability using the same slot-time normalization
   const recheck = await checkAvailability({
     empresa_id: empresaId,
     service_id: context.service_id!,
     date: slot.start.slice(0, 10),
     timezone: 'Europe/Lisbon',
-    preferred_time: new Date(slot.start).toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit', minute: '2-digit' }),
+    preferred_time: slotTime,
   });
 
   const stillAvailable = recheck.slots.some(s => s.start === slot.start && s.end === slot.end);
+  console.log('[FLOW_DEBUG_BOOKING_CONFLICT_CHECK]', JSON.stringify({
+    stage: 'after_recheck',
+    start: slot.start,
+    end: slot.end,
+    resource_id: slot.resource_id ?? null,
+    timezone: 'Europe/Lisbon',
+    query_filters: bookingQueryFilters,
+    conflicting_rows: overlappingConflictRows.map((booking) => ({
+      id: booking.id,
+      start: booking.start_datetime,
+      end: booking.end_datetime,
+      resource_id: booking.resource_id,
+      estado: booking.estado ?? null,
+      scheduling_state: booking.scheduling_state ?? null,
+    })),
+    returned_slots: recheck.slots.map((candidate) => ({
+      start: candidate.start,
+      end: candidate.end,
+      resource_id: candidate.resource_id ?? null,
+    })),
+    still_available: stillAvailable,
+  }));
   if (!stillAvailable) {
     await log({
       empresa_id: empresaId,

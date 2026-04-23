@@ -31,9 +31,12 @@ interface Resource {
 }
 
 interface ExistingBooking {
+  id: string;
   start_datetime: string;
   end_datetime: string;
   resource_id: string;
+  estado?: string | null;
+  scheduling_state?: string | null;
 }
 
 function timeToMinutes(time: string): number {
@@ -112,7 +115,7 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
 
   const { data: existingBookings } = await db
     .from('agendamentos')
-    .select('start_datetime, end_datetime, resource_id')
+    .select('id, start_datetime, end_datetime, resource_id, estado, scheduling_state')
     .eq('empresa_id', req.empresa_id)
     .gte('start_datetime', req.date + 'T00:00:00Z')
     .lt('start_datetime', req.date + 'T23:59:59Z')
@@ -149,6 +152,13 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
 
     const slotStartISO = `${req.date}T${minutesToTime(slotStart)}:00.000Z`;
     const slotEndISO = `${req.date}T${minutesToTime(slotEnd)}:00.000Z`;
+    const overlappingRows = bookings.filter((booking) => {
+      const bookingStart = new Date(booking.start_datetime).getTime();
+      const bookingEnd = new Date(booking.end_datetime).getTime();
+      const candidateStart = new Date(slotStartISO).getTime();
+      const candidateEnd = new Date(slotEndISO).getTime();
+      return candidateStart < bookingEnd && candidateEnd > bookingStart;
+    });
 
     let isAvailable = true;
 
@@ -179,6 +189,31 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
     }
 
     if (isAvailable) {
+      console.log('[FLOW_DEBUG_AVAILABILITY_SOURCE]', JSON.stringify({
+        start: slotStartISO,
+        end: slotEndISO,
+        resource_id: resources[0]?.id ?? '',
+        timezone: req.timezone,
+        query_filters: {
+          empresa_id: req.empresa_id,
+          service_id: req.service_id,
+          date: req.date,
+          start_gte: req.date + 'T00:00:00Z',
+          start_lt: req.date + 'T23:59:59Z',
+          excluded_estado: 'cancelado',
+          excluded_scheduling_state: 'cancelled',
+          preferred_time: req.preferred_time ?? null,
+        },
+        conflicting_rows: overlappingRows.map((booking) => ({
+          id: booking.id,
+          start: booking.start_datetime,
+          end: booking.end_datetime,
+          resource_id: booking.resource_id,
+          estado: booking.estado ?? null,
+          scheduling_state: booking.scheduling_state ?? null,
+        })),
+      }));
+
       slots.push({
         start: slotStartISO,
         end: slotEndISO,
