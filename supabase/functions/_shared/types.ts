@@ -130,6 +130,7 @@ export type ExtractedIntent =
   | 'HUMAN_REQUEST'
   | 'CONFIRMATION'
   | 'SLOT_SELECTION'
+  | 'TIME_BASED_SELECTION'
   | 'DATE_CHANGE'
   | 'CORRECTION'
   | 'EXPLICIT_RESTART'

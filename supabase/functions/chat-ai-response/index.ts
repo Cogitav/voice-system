@@ -11,7 +11,7 @@ import {
 import { handleSystemError, resetErrorCount } from '../_shared/error-handler.ts';
 import { EMOTION_KEYWORDS, ERROR_MESSAGES, HANDOFF_RULES } from '../_shared/constants.ts';
 import { resolveService, loadServices } from '../_shared/service-resolver.ts';
-import { orchestrateBooking, resolveSlotSelectionFromContext } from '../_shared/booking-orchestrator.ts';
+import { findClosestSlot, orchestrateBooking, resolveSlotSelectionFromContext } from '../_shared/booking-orchestrator.ts';
 import { executeBooking } from '../_shared/booking-executor.ts';
 import { answerFromKnowledge } from '../_shared/knowledge-retriever.ts';
 import { generateResponse } from '../_shared/response-generator.ts';
@@ -320,6 +320,45 @@ function shouldKeepCurrentDateOnTimeOnlyChange(
   return !!(context.selected_slot || context.preferred_date);
 }
 
+function normalizeSignalText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function hasCompletedBookingMutationSignal(
+  context: ConversationContext,
+  extraction: LLMExtraction,
+  userMessage: string
+): boolean {
+  if (context.state !== 'completed') return false;
+  if (!context.execution_id && !context.agendamento_id && !context.confirmed_snapshot) return false;
+
+  if (
+    extraction.intent === 'BOOKING_NEW' ||
+    extraction.intent === 'RESCHEDULE' ||
+    extraction.intent === 'DATE_CHANGE' ||
+    extraction.intent === 'CORRECTION'
+  ) {
+    return true;
+  }
+
+  if (extraction.date_parsed || extraction.time_parsed) return true;
+
+  const normalized = normalizeSignalText(userMessage);
+  return /\b(alias|afinal|antes|depois|alterar|mudar|trocar|remarcar|reagendar|reschedule|change|instead|earlier|later)\b/.test(normalized);
+}
+
+function shouldResetExecutionForSelectedSlot(context: ConversationContext): boolean {
+  if (!context.execution_id) return false;
+  if (!context.agendamento_id && !context.confirmed_snapshot) return false;
+  if (!context.selected_slot?.start) return false;
+
+  const confirmedStart = context.confirmed_snapshot?.start ?? null;
+  return !confirmedStart || confirmedStart !== context.selected_slot.start;
+}
+
 function logSlotSelectionDebug(
   selectedIndex: number | null,
   selectedSlotStart: string | null,
@@ -328,6 +367,20 @@ function logSlotSelectionDebug(
   logFlow('[FLOW_DEBUG]', {
     selected_index: selectedIndex,
     selected_slot_start: selectedSlotStart,
+    available_slots_count: availableSlotsCount,
+  });
+}
+
+function logTimeMatchDebug(
+  timeParsed: string | null,
+  matchedSlotStart: string | null,
+  matchType: 'exact' | 'closest' | 'fallback',
+  availableSlotsCount: number
+): void {
+  logFlow('[FLOW_DEBUG_TIME_MATCH]', {
+    time_parsed: timeParsed,
+    matched_slot_start: matchedSlotStart,
+    match_type: matchType,
     available_slots_count: availableSlotsCount,
   });
 }
@@ -458,9 +511,24 @@ serve(async (req) => {
       extraction = parseExtractionResponse('');
     }
     extraction = normalizeExtraction(extraction);
+    const originalIntent = extraction.intent;
+    if (
+      extraction.time_parsed &&
+      (
+        ACTIVE_BOOKING_STATES.has(context.state) ||
+        (context.state !== 'completed' && context.available_slots.length > 0) ||
+        extraction.intent === 'SLOT_SELECTION'
+      )
+    ) {
+      extraction = {
+        ...extraction,
+        intent: 'TIME_BASED_SELECTION',
+      };
+    }
     logFlow('[FLOW_EXTRACTION]', {
       conversation_id: conversationId,
       intent: extraction.intent ?? null,
+      original_intent: originalIntent ?? null,
       confirmation: extraction.confirmation ?? null,
       date_parsed: extraction.date_parsed ?? null,
       time_parsed: extraction.time_parsed ?? null,
@@ -543,6 +611,44 @@ serve(async (req) => {
     }
 
     let updatedContext = await updateContext(conversationId, extractionUpdates, currentVersion);
+
+    if (hasCompletedBookingMutationSignal(updatedContext, extraction, userMessage)) {
+      const previousState = updatedContext.state ?? null;
+      const previousExecutionId = updatedContext.execution_id ?? null;
+      const previousSelectedSlotStart = updatedContext.selected_slot?.start ?? null;
+      const previousAgendamentoId =
+        updatedContext.agendamento_id ?? updatedContext.confirmed_snapshot?.agendamento_id ?? null;
+      const isExplicitReschedule = extraction.intent === 'RESCHEDULE';
+
+      updatedContext = await updateContext(conversationId, {
+        state: 'collecting_data',
+        current_intent: isExplicitReschedule ? 'RESCHEDULE' : 'BOOKING_NEW',
+        execution_id: null,
+        agendamento_id: null,
+        confirmed_snapshot: null,
+        booking_lifecycle_id: null,
+        selected_slot: null,
+        available_slots: [],
+        slots_page: 0,
+        slots_generated_for_date: null,
+        reschedule_from_agendamento_id: isExplicitReschedule ? previousAgendamentoId : null,
+        reschedule_new_date: null,
+        reschedule_new_time: null,
+        reschedule_new_slot: null,
+        error_context: resetErrorCount(updatedContext.error_context),
+      }, updatedContext.context_version);
+
+      logFlow('[FLOW_DEBUG_EXECUTION_REUSE]', {
+        current_state: previousState,
+        current_execution_id: previousExecutionId,
+        selected_slot_start: previousSelectedSlotStart,
+        agendamento_id_in_context: previousAgendamentoId,
+        execution_id_was_reset: true,
+        source_branch: isExplicitReschedule
+          ? 'post_completed_reschedule_reset'
+          : 'post_completed_change_reset',
+      });
+    }
 
     logFlow('[FLOW_CONTEXT]', {
       stage: 'after_initial_update',
@@ -691,6 +797,77 @@ serve(async (req) => {
     const isActiveBookingState = ACTIVE_BOOKING_STATES.has(updatedContext.state);
     const allowLegacyIntentRouting = !isActiveBookingState;
 
+    const processTimeBasedSlotSearch = async (source: 'decision' | 'legacy_state') => {
+      logFlow('[FLOW_BRANCH]', {
+        conversation_id: conversationId,
+        branch: 'SLOT_SEARCH_BY_TIME',
+        source,
+        state: updatedContext.state ?? null,
+      });
+
+      const availableSlotsCount = updatedContext.available_slots.length;
+      const requestedTime = extraction.time_parsed ?? '';
+      const match = findClosestSlot(requestedTime, updatedContext.available_slots);
+      const matchedSlot = match.slot;
+      logTimeMatchDebug(
+        requestedTime || null,
+        matchedSlot?.start ?? null,
+        match.match_type,
+        availableSlotsCount
+      );
+
+      if (matchedSlot && (match.match_type === 'exact' || match.match_type === 'closest')) {
+        const missingFieldLabels = getMissingBookingFieldLabels(
+          updatedContext,
+          requirePhone,
+          requireReason
+        );
+        const isExact = match.match_type === 'exact';
+        const matchedTime = extractTimeStart(matchedSlot) ?? buildSlotDisplay(matchedSlot);
+        const closestPrefix = isExact
+          ? null
+          : `Nao temos exatamente as ${requestedTime}, mas temos as ${matchedTime}. Pode ser?`;
+
+        if (missingFieldLabels.length > 0) {
+          updatedContext = await updateContext(conversationId, {
+            selected_slot: matchedSlot,
+            preferred_date: extractDate(matchedSlot),
+            state: 'collecting_data',
+          }, updatedContext.context_version);
+
+          const dataPrompt = buildMissingDataPrompt(missingFieldLabels);
+          reply = closestPrefix ? `${closestPrefix}\n\n${dataPrompt}` : dataPrompt;
+          return;
+        }
+
+        updatedContext = await updateContext(conversationId, {
+          selected_slot: matchedSlot,
+          preferred_date: extractDate(matchedSlot),
+          state: 'awaiting_confirmation',
+        }, updatedContext.context_version);
+
+        reply = isExact
+          ? HARDCODED_TEMPLATES.awaiting_confirmation(buildConfirmedSnapshot(updatedContext, matchedSlot))
+          : closestPrefix!;
+        return;
+      }
+
+      const orderedSlots = match.ordered_slots.length > 0
+        ? match.ordered_slots
+        : updatedContext.available_slots;
+      updatedContext = await updateContext(conversationId, {
+        available_slots: orderedSlots,
+        selected_slot: null,
+        state: 'awaiting_slot_selection',
+      }, updatedContext.context_version);
+
+      reply = buildSlotsPresentationReply(
+        updatedContext.available_slots,
+        `Nao encontrei um horario proximo de ${requestedTime}. Estes sao os horarios mais proximos:`,
+        'Indique o numero do horario que prefere.'
+      );
+    };
+
     const processCreateBooking = async (source: 'decision' | 'legacy_confirmation') => {
       logFlow('[FLOW_BRANCH]', {
         conversation_id: conversationId,
@@ -706,6 +883,31 @@ serve(async (req) => {
       }
 
       const stateBeforeBooking = updatedContext.state ?? null;
+      let executionIdResetBeforeBooking = false;
+      if (shouldResetExecutionForSelectedSlot(updatedContext)) {
+        const previousExecutionId = updatedContext.execution_id ?? null;
+        const previousSelectedSlotStart = updatedContext.selected_slot?.start ?? null;
+        const previousAgendamentoId =
+          updatedContext.agendamento_id ?? updatedContext.confirmed_snapshot?.agendamento_id ?? null;
+
+        updatedContext = await updateContext(conversationId, {
+          execution_id: null,
+          agendamento_id: null,
+          confirmed_snapshot: null,
+          booking_lifecycle_id: null,
+        }, updatedContext.context_version);
+        executionIdResetBeforeBooking = true;
+
+        logFlow('[FLOW_DEBUG_EXECUTION_REUSE]', {
+          current_state: stateBeforeBooking,
+          current_execution_id: previousExecutionId,
+          selected_slot_start: previousSelectedSlotStart,
+          agendamento_id_in_context: previousAgendamentoId,
+          execution_id_was_reset: true,
+          source_branch: `${source}_stale_selected_slot_reset`,
+        });
+      }
+
       const executionId = updatedContext.execution_id ?? crypto.randomUUID();
       const bookingContextUpdates: Partial<ConversationContext> = {};
 
@@ -724,6 +926,15 @@ serve(async (req) => {
           updatedContext.context_version
         );
       }
+
+      logFlow('[FLOW_DEBUG_EXECUTION_REUSE]', {
+        current_state: stateBeforeBooking,
+        current_execution_id: updatedContext.execution_id ?? null,
+        selected_slot_start: updatedContext.selected_slot?.start ?? null,
+        agendamento_id_in_context: updatedContext.agendamento_id ?? null,
+        execution_id_was_reset: executionIdResetBeforeBooking,
+        source_branch: `${source}_before_booking`,
+      });
 
       logFlow('[FLOW_DEBUG_BOOKING]', {
         stage: 'before_execute',
@@ -906,6 +1117,7 @@ serve(async (req) => {
     // --- 9d. BOOKING FLOW (state-driven, ALL branches use updatedContext.state) ---
     } else if (
       intent === 'BOOKING_NEW' ||
+      intent === 'TIME_BASED_SELECTION' ||
       isActiveBookingState
     ) {
 
@@ -1081,6 +1293,9 @@ serve(async (req) => {
           'Indique o numero do horario que prefere.'
         );
 
+      } else if (decision.action === 'SLOT_SEARCH_BY_TIME' && updatedContext.available_slots.length > 0) {
+        await processTimeBasedSlotSearch('decision');
+
       } else if (decision.action === 'SELECT_SLOT' && updatedContext.available_slots.length > 0) {
         logFlow('[FLOW_BRANCH]', {
           conversation_id: conversationId,
@@ -1215,7 +1430,9 @@ serve(async (req) => {
           const timeOnlyPattern = /\b(\d{1,2})\s*h(?:oras?)?(?:\s*(\d{2}))?\b|^às?\s+(\d{1,2})/i;
           const isTimeRequest = timeOnlyPattern.test(userMessage) && extraction.intent !== 'CANCEL';
 
-          if (isTimeRequest && updatedContext.available_slots.length > 0) {
+          if (isTimeRequest && extraction.time_parsed && updatedContext.available_slots.length > 0) {
+            await processTimeBasedSlotSearch('legacy_state');
+          } else if (isTimeRequest && updatedContext.available_slots.length > 0) {
             const currentDate = extractDate(updatedContext.selected_slot) ?? updatedContext.preferred_date;
             const selectionContext = keepCurrentDateOnTimeOnlyChange && currentDate
               ? {

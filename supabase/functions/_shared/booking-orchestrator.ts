@@ -15,6 +15,23 @@ export interface SlotSelectionResult {
   selected_index: number | null;
 }
 
+export interface TimeSlotMatchResult {
+  slot: SlotSuggestion | null;
+  selected_index: number | null;
+  match_type: 'exact' | 'closest' | 'fallback';
+  ordered_slots: SlotSuggestion[];
+}
+
+interface TimeSlotCandidate {
+  slot: SlotSuggestion;
+  selected_index: number;
+  minutes: number;
+  distance: number;
+  futureDistance: number | null;
+}
+
+const REASONABLE_TIME_MATCH_WINDOW_MINUTES = 120;
+
 // Groups personal fields together for natural collection
 function getPersonalFieldsGroup(missing: string[]): string[] {
   const personal = ['customer_name', 'customer_email', 'customer_phone'];
@@ -177,6 +194,112 @@ export async function orchestrateBooking(
   };
 }
 
+function parseTimeToMinutes(value: string | null): number | null {
+  if (!value) return null;
+  const match = value.trim().toLowerCase().match(/^(\d{1,2})(?::|h)?(\d{2})?$/);
+  if (!match) return null;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2] ?? '00');
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+
+  return hours * 60 + minutes;
+}
+
+function getSlotStartMinutes(slot: SlotSuggestion): number | null {
+  const match = slot.start.match(/T(\d{2}):(\d{2})/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+export function findClosestSlot(
+  timeParsed: string,
+  availableSlots: SlotSuggestion[]
+): TimeSlotMatchResult {
+  const requestedMinutes = parseTimeToMinutes(timeParsed);
+  const fallbackResult: TimeSlotMatchResult = {
+    slot: null,
+    selected_index: null,
+    match_type: 'fallback',
+    ordered_slots: availableSlots,
+  };
+
+  if (requestedMinutes === null || availableSlots.length === 0) {
+    return fallbackResult;
+  }
+
+  const candidates = availableSlots
+    .map((slot, index) => {
+      const minutes = getSlotStartMinutes(slot);
+      if (minutes === null) return null;
+      return {
+        slot,
+        selected_index: index + 1,
+        minutes,
+        distance: Math.abs(minutes - requestedMinutes),
+        futureDistance: minutes >= requestedMinutes ? minutes - requestedMinutes : null,
+      };
+    })
+    .filter((candidate): candidate is TimeSlotCandidate => candidate !== null);
+
+  if (candidates.length === 0) {
+    return fallbackResult;
+  }
+
+  const orderedCandidates = [...candidates].sort((a, b) => {
+    if (a.distance !== b.distance) return a.distance - b.distance;
+    if (a.futureDistance !== null && b.futureDistance === null) return -1;
+    if (a.futureDistance === null && b.futureDistance !== null) return 1;
+    return a.minutes - b.minutes;
+  });
+  const ordered_slots = orderedCandidates.map((candidate) => candidate.slot);
+
+  const exact = candidates.find((candidate) => candidate.minutes === requestedMinutes);
+  if (exact) {
+    return {
+      slot: exact.slot,
+      selected_index: exact.selected_index,
+      match_type: 'exact',
+      ordered_slots,
+    };
+  }
+
+  const closestFuture = candidates
+    .filter((candidate) => candidate.futureDistance !== null)
+    .sort((a, b) => (a.futureDistance! - b.futureDistance!) || (a.minutes - b.minutes))[0];
+
+  if (
+    closestFuture &&
+    closestFuture.futureDistance !== null &&
+    closestFuture.futureDistance <= REASONABLE_TIME_MATCH_WINDOW_MINUTES
+  ) {
+    return {
+      slot: closestFuture.slot,
+      selected_index: closestFuture.selected_index,
+      match_type: 'closest',
+      ordered_slots,
+    };
+  }
+
+  const closestOverall = orderedCandidates[0];
+  if (closestOverall.distance <= REASONABLE_TIME_MATCH_WINDOW_MINUTES) {
+    return {
+      slot: closestOverall.slot,
+      selected_index: closestOverall.selected_index,
+      match_type: 'closest',
+      ordered_slots,
+    };
+  }
+
+  return {
+    slot: closestOverall.slot,
+    selected_index: closestOverall.selected_index,
+    match_type: 'fallback',
+    ordered_slots,
+  };
+}
+
 export function resolveSlotSelectionFromContext(
   context: ConversationContext,
   input: string
@@ -215,34 +338,6 @@ export function resolveSlotSelectionFromContext(
   for (const [word, idx] of Object.entries(numberWords)) {
     if (lower.includes(word) && idx < slots.length) {
       return { slot: slots[idx], selected_index: idx + 1 };
-    }
-  }
-
-  const timeMatch = lower.match(/\b(\d{1,2})(?:h(\d{2})?|:(\d{2}))?\b/);
-  if (timeMatch) {
-    const hour = timeMatch[1].padStart(2, '0');
-    const min = timeMatch[2] ?? timeMatch[3] ?? '00';
-    const timeStr = `${hour}:${min}`;
-    // Try exact match first
-    let found = slots.find(s => s.display_label.includes(timeStr));
-    // If no exact match, try hour-only match
-    if (!found) {
-      found = slots.find(s => s.display_label.includes(`${hour}:`));
-    }
-    // If still no match, try matching against slot start time
-    if (!found) {
-      found = slots.find(s => {
-        const slotHour = new Date(s.start).toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit' }).slice(0, 2);
-        return slotHour === hour;
-      });
-    }
-    if (found) {
-      const idx = slots.findIndex((slot) =>
-        slot.start === found?.start &&
-        slot.end === found?.end &&
-        slot.resource_id === found?.resource_id
-      );
-      return { slot: found, selected_index: idx >= 0 ? idx + 1 : null };
     }
   }
 

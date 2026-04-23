@@ -22,6 +22,7 @@ const VALID_INTENTS: ExtractedIntent[] = [
   'HUMAN_REQUEST',
   'CONFIRMATION',
   'SLOT_SELECTION',
+  'TIME_BASED_SELECTION',
   'DATE_CHANGE',
   'CORRECTION',
   'EXPLICIT_RESTART',
@@ -50,6 +51,7 @@ INTENT VALUES (choose exactly one):
 - HUMAN_REQUEST: user explicitly wants to speak to a person
 - CONFIRMATION: user is confirming something (yes, correct, confirm)
 - SLOT_SELECTION: user is selecting a time slot from a presented list
+- TIME_BASED_SELECTION: user is selecting or correcting a slot by providing a specific time
 - DATE_CHANGE: user is providing or changing a date
 - CORRECTION: user is correcting previously provided data
 - EXPLICIT_RESTART: user explicitly wants to start over

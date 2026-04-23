@@ -156,6 +156,7 @@ function canTrySlotSelection(
   userMessage: string
 ): boolean {
   if (!hasAvailableSlots(context)) return false;
+  if (extraction.time_parsed) return false;
 
   if (context.state === 'awaiting_slot_selection') return true;
 
@@ -167,6 +168,10 @@ function canTrySlotSelection(
   }
 
   return false;
+}
+
+function canSearchSlotByTime(context: ConversationContext, extraction: LLMExtraction): boolean {
+  return !!extraction.time_parsed && hasAvailableSlots(context);
 }
 
 function hasServiceResolutionSignal(
@@ -261,6 +266,15 @@ function decideFromActiveBookingState(
   }
 
   if (state === 'awaiting_slot_selection') {
+    if (canSearchSlotByTime(context, extraction)) {
+      return buildDecision(
+        'SLOT_SEARCH_BY_TIME',
+        'awaiting_confirmation',
+        0.94,
+        'Active awaiting_slot_selection state: user provided a specific time, resolve by time before index selection'
+      );
+    }
+
     if (canTrySlotSelection(context, extraction, userMessage)) {
       return buildDecision(
         'SELECT_SLOT',
@@ -287,6 +301,15 @@ function decideFromActiveBookingState(
         'booking_processing',
         0.96,
         'Active awaiting_confirmation state: explicit confirmation should create the booking'
+      );
+    }
+
+    if (canSearchSlotByTime(context, extraction)) {
+      return buildDecision(
+        'SLOT_SEARCH_BY_TIME',
+        'awaiting_confirmation',
+        0.94,
+        'Active awaiting_confirmation state: user provided a time correction, resolve by time'
       );
     }
 
@@ -427,6 +450,15 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
       'booking_processing',
       0.96,
       'Explicit confirmation detected in awaiting_confirmation state'
+    );
+  }
+
+  if (canSearchSlotByTime(context, extraction)) {
+    return buildDecision(
+      'SLOT_SEARCH_BY_TIME',
+      'awaiting_confirmation',
+      0.92,
+      'Time-based slot selection should be resolved by closest available slot'
     );
   }
 

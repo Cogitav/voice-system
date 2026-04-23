@@ -8,6 +8,7 @@ export type ActionType =
   | 'GENERATE_SLOTS'
   | 'SHOW_SLOTS'
   | 'SELECT_SLOT'
+  | 'SLOT_SEARCH_BY_TIME'
   | 'CONFIRM_BOOKING'
   | 'CREATE_BOOKING'
   | 'START_CANCEL'
