@@ -23,7 +23,7 @@ export async function executeReschedule(
   // Verify appointment exists and belongs to this empresa
   const { data: existing } = await db
     .from('agendamentos')
-    .select('id, service_id, scheduling_state')
+    .select('id, service_id, start_datetime, end_datetime, estado, scheduling_state')
     .eq('id', appointmentId)
     .eq('empresa_id', empresaId)
     .single();
@@ -49,9 +49,16 @@ export async function executeReschedule(
     return { success: false, agendamento_id: null, error: 'Slot já não está disponível.', error_code: 'SLOT_CONFLICT' };
   }
 
-  const startDate = new Date(newSlot.start);
-  const dataStr = startDate.toLocaleDateString('en-CA', { timeZone: 'Europe/Lisbon' });
-  const horaStr = startDate.toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit', minute: '2-digit' });
+  const dataStr = newSlot.start.slice(0, 10);
+  const horaStr = `${newSlot.start.match(/T(\d{2}:\d{2})/)?.[1] ?? '00:00'}:00`;
+  const previousBookingStatus = {
+    estado: existing.estado ?? null,
+    scheduling_state: existing.scheduling_state ?? null,
+  };
+  const finalBookingStatus = {
+    estado: 'confirmado',
+    scheduling_state: 'confirmed',
+  };
 
   const { error: updateError } = await db
     .from('agendamentos')
@@ -62,12 +69,21 @@ export async function executeReschedule(
       end_datetime: newSlot.end,
       resource_id: newSlot.resource_id || null,
       scheduling_state: 'confirmed',
-      estado: 'remarcado',
+      estado: 'confirmado',
     })
     .eq('id', appointmentId)
     .eq('empresa_id', empresaId);
 
   if (updateError) {
+    console.log('[FLOW_DEBUG_RESCHEDULE]', JSON.stringify({
+      original_agendamento_id: appointmentId,
+      new_agendamento_id: null,
+      old_slot_start: existing.start_datetime ?? null,
+      new_slot_start: newSlot.start,
+      previous_booking_status: previousBookingStatus,
+      final_booking_status: null,
+      reschedule_success: false,
+    }));
     return { success: false, agendamento_id: null, error: 'Erro ao remarcar.', error_code: 'DB_ERROR' };
   }
 
@@ -82,6 +98,16 @@ export async function executeReschedule(
     outcome: 'success',
     credits_consumed: 3,
   });
+
+  console.log('[FLOW_DEBUG_RESCHEDULE]', JSON.stringify({
+    original_agendamento_id: appointmentId,
+    new_agendamento_id: appointmentId,
+    old_slot_start: existing.start_datetime ?? null,
+    new_slot_start: newSlot.start,
+    previous_booking_status: previousBookingStatus,
+    final_booking_status: finalBookingStatus,
+    reschedule_success: true,
+  }));
 
   return { success: true, agendamento_id: appointmentId, error: null, error_code: null };
 }

@@ -157,6 +157,7 @@ function canTrySlotSelection(
 ): boolean {
   if (!hasAvailableSlots(context)) return false;
   if (extraction.time_parsed) return false;
+  if (extraction.relative_time_direction) return false;
 
   if (context.state === 'awaiting_slot_selection') return true;
 
@@ -171,7 +172,7 @@ function canTrySlotSelection(
 }
 
 function canSearchSlotByTime(context: ConversationContext, extraction: LLMExtraction): boolean {
-  return !!extraction.time_parsed && hasAvailableSlots(context);
+  return !!(extraction.time_parsed || extraction.relative_time_direction) && hasAvailableSlots(context);
 }
 
 function hasServiceResolutionSignal(
@@ -297,10 +298,12 @@ function decideFromActiveBookingState(
   if (state === 'awaiting_confirmation') {
     if (hasClearConfirmation(context, extraction, userMessage)) {
       return buildDecision(
-        'CREATE_BOOKING',
+        context.reschedule_from_agendamento_id ? 'EXECUTE_RESCHEDULE' : 'CREATE_BOOKING',
         'booking_processing',
         0.96,
-        'Active awaiting_confirmation state: explicit confirmation should create the booking'
+        context.reschedule_from_agendamento_id
+          ? 'Active awaiting_confirmation state: explicit confirmation should execute reschedule'
+          : 'Active awaiting_confirmation state: explicit confirmation should create the booking'
       );
     }
 
@@ -446,10 +449,12 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
 
   if (hasClearConfirmation(context, extraction, userMessage)) {
     return buildDecision(
-      'CREATE_BOOKING',
+      context.reschedule_from_agendamento_id ? 'EXECUTE_RESCHEDULE' : 'CREATE_BOOKING',
       'booking_processing',
       0.96,
-      'Explicit confirmation detected in awaiting_confirmation state'
+      context.reschedule_from_agendamento_id
+        ? 'Explicit confirmation detected for reschedule'
+        : 'Explicit confirmation detected in awaiting_confirmation state'
     );
   }
 

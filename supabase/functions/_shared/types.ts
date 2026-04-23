@@ -42,6 +42,8 @@ export interface ConversationContext {
   current_intent: Intent | null;
   service_id: string | null;
   service_name: string | null;
+  service_source: string | null;
+  service_locked: boolean;
   preferred_date: string | null;
   preferred_time: string | null;
   available_slots: SlotSuggestion[];
@@ -167,6 +169,8 @@ export interface LLMExtraction {
   time_raw: string | null;
   date_parsed: string | null;
   time_parsed: string | null;
+  time_operator: 'exact' | 'before' | 'after' | null;
+  relative_time_direction: 'earlier' | 'later' | null;
   intent: ExtractedIntent;
   emotional_context: EmotionalContext | null;
   slot_selection: SlotSelection | null;

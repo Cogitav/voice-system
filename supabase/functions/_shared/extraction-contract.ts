@@ -41,7 +41,8 @@ EXTRACTION RULES:
 6. For dates: always copy the original text into date_raw. Only fill date_parsed (ISO format YYYY-MM-DD) if you are highly confident of the exact date. Otherwise leave date_parsed as null.
 7. For times: always copy the original text into time_raw. Only fill time_parsed (HH:MM format) if you are highly confident. Otherwise leave time_parsed as null.
 8. For service: set service_keywords to relevant words from the message. Set service_id ONLY if the user names a service that exactly matches a known service. Otherwise service_id is null.
-9. ALWAYS return the same JSON structure, even if all fields are null.
+9. For comparative time language: set time_operator to "before" for phrases like "antes das 16h", "after" for "depois das 16h", otherwise "exact" when a specific time is provided. Set relative_time_direction to "earlier" for "mais cedo"/"antes" without a specific time, and "later" for "mais tarde"/"depois" without a specific time.
+10. ALWAYS return the same JSON structure, even if all fields are null.
 
 INTENT VALUES (choose exactly one):
 - BOOKING_NEW: user wants to make a new booking
@@ -84,6 +85,8 @@ RETURN ONLY this JSON structure, with no explanation, no markdown, no code fence
   "time_raw": string | null,
   "date_parsed": string | null,
   "time_parsed": string | null,
+  "time_operator": "exact" | "before" | "after" | null,
+  "relative_time_direction": "earlier" | "later" | null,
   "intent": string,
   "emotional_context": { "tone": string, "keywords": string[], "detected_by": "llm" } | null,
   "slot_selection": { "method": string, "value": string } | null,
@@ -103,6 +106,8 @@ export function parseExtractionResponse(raw: string): LLMExtraction {
     time_raw: null,
     date_parsed: null,
     time_parsed: null,
+    time_operator: null,
+    relative_time_direction: null,
     intent: 'UNCLEAR',
     emotional_context: null,
     slot_selection: null,
@@ -142,6 +147,12 @@ export function parseExtractionResponse(raw: string): LLMExtraction {
     time_raw: typeof parsed.time_raw === 'string' ? parsed.time_raw : null,
     date_parsed: typeof parsed.date_parsed === 'string' ? parsed.date_parsed : null,
     time_parsed: typeof parsed.time_parsed === 'string' ? parsed.time_parsed : null,
+    time_operator: parsed.time_operator === 'exact' || parsed.time_operator === 'before' || parsed.time_operator === 'after'
+      ? parsed.time_operator
+      : null,
+    relative_time_direction: parsed.relative_time_direction === 'earlier' || parsed.relative_time_direction === 'later'
+      ? parsed.relative_time_direction
+      : null,
     intent,
     emotional_context: parsed.emotional_context != null && typeof parsed.emotional_context === 'object'
       ? parsed.emotional_context as LLMExtraction['emotional_context']

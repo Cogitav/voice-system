@@ -44,6 +44,11 @@ function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
+function slotStartToMinutes(slot: SlotSuggestion): number {
+  const match = slot.start.match(/T(\d{2}:\d{2})/);
+  return match ? timeToMinutes(match[1]) : 0;
+}
+
 function minutesToTime(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -230,17 +235,24 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
     const prefHour = req.preferred_time.slice(0, 2);
     const prefMin = req.preferred_time.slice(3, 5) ?? '00';
     const prefTimeStr = `${prefHour}:${prefMin}`;
+    const preferredMinutes = timeToMinutes(prefTimeStr);
+    const slotsByProximity = [...slots].sort((a, b) => {
+      const aDistance = Math.abs(slotStartToMinutes(a) - preferredMinutes);
+      const bDistance = Math.abs(slotStartToMinutes(b) - preferredMinutes);
+      if (aDistance !== bDistance) return aDistance - bDistance;
+      return slotStartToMinutes(a) - slotStartToMinutes(b);
+    });
 
-    // Find exact match
-    const exactMatch = slots.find(s => s.display_label.includes(prefTimeStr));
+    // Find exact start-time match. Do not match the requested time against slot end labels.
+    const exactMatch = slots.find(s => slotStartToMinutes(s) === preferredMinutes);
 
     if (exactMatch) {
-      // Requested time is available - return it as first option + 4 alternatives
-      const alternatives = slots.filter(s => !s.display_label.includes(prefTimeStr)).slice(0, 4);
+      // Requested time is available - return it as first option + 4 closest alternatives
+      const alternatives = slotsByProximity.filter(s => slotStartToMinutes(s) !== preferredMinutes).slice(0, 4);
       return { slots: [exactMatch, ...alternatives], has_availability: true, date_checked: req.date };
     } else {
-      // Requested time not available - return 5 alternatives
-      return { slots: slots.slice(0, 5), has_availability: slots.length > 0, date_checked: req.date, preferred_time_unavailable: true };
+      // Requested time not available - return 5 closest alternatives
+      return { slots: slotsByProximity.slice(0, 5), has_availability: slots.length > 0, date_checked: req.date, preferred_time_unavailable: true };
     }
   }
 

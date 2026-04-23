@@ -13,6 +13,7 @@ import { EMOTION_KEYWORDS, ERROR_MESSAGES, HANDOFF_RULES } from '../_shared/cons
 import { resolveService, loadServices } from '../_shared/service-resolver.ts';
 import { findClosestSlot, orchestrateBooking, resolveSlotSelectionFromContext } from '../_shared/booking-orchestrator.ts';
 import { executeBooking } from '../_shared/booking-executor.ts';
+import { executeReschedule } from '../_shared/reschedule-handler.ts';
 import { answerFromKnowledge } from '../_shared/knowledge-retriever.ts';
 import { generateResponse } from '../_shared/response-generator.ts';
 import {
@@ -25,7 +26,7 @@ import { createLeadIfEligible } from '../_shared/lead-manager.ts';
 import { checkCredits, consumeCredits } from '../_shared/credit-manager.ts';
 import { canTransition } from '../_shared/state-machine.ts';
 import { log } from '../_shared/logger.ts';
-import { ConversationContext, LLMExtraction } from '../_shared/types.ts';
+import { ConversationContext, LLMExtraction, SchedulingService, SlotSuggestion } from '../_shared/types.ts';
 import { decideNextAction } from '../_shared/decision-engine.ts';
 
 const corsHeaders = {
@@ -41,6 +42,14 @@ const ACTIVE_BOOKING_STATES = new Set([
   'awaiting_slot_selection',
   'awaiting_confirmation',
   'booking_processing',
+]);
+
+const SERVICE_LOCK_GUARDED_STATES = new Set([
+  'collecting_data',
+  'collecting_date',
+  'collecting_personal_data',
+  'awaiting_slot_selection',
+  'awaiting_confirmation',
 ]);
 
 // =============================================================================
@@ -327,6 +336,58 @@ function normalizeSignalText(value: string): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+function inferTimeRelation(
+  userMessage: string,
+  extraction: LLMExtraction
+): Pick<LLMExtraction, 'time_operator' | 'relative_time_direction'> {
+  const normalized = normalizeSignalText(userMessage);
+  const hasSpecificTime = !!extraction.time_parsed;
+  const saysBefore = /\b(antes|before|earlier than)\b/.test(normalized);
+  const saysAfter = /\b(depois|apos|after|later than)\b/.test(normalized);
+  const saysEarlier = /\b(mais cedo|earlier)\b/.test(normalized) || (!hasSpecificTime && saysBefore);
+  const saysLater = /\b(mais tarde|later)\b/.test(normalized) || (!hasSpecificTime && saysAfter);
+
+  return {
+    time_operator: hasSpecificTime
+      ? (saysBefore ? 'before' : saysAfter ? 'after' : (extraction.time_operator ?? 'exact'))
+      : (extraction.time_operator ?? null),
+    relative_time_direction: hasSpecificTime
+      ? null
+      : extraction.relative_time_direction ?? (saysEarlier ? 'earlier' : saysLater ? 'later' : null),
+  };
+}
+
+function parseNumericMenuSelection(input: string): number | null {
+  const match = normalizeSignalText(input).trim().match(/^(?:opcao\s*)?(\d{1,2})$/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function resolveNumericServiceSelection(
+  input: string,
+  services: SchedulingService[]
+): SchedulingService | null {
+  const selectedNumber = parseNumericMenuSelection(input);
+  if (selectedNumber === null) return null;
+  const index = selectedNumber - 1;
+  return index >= 0 && index < services.length ? services[index] : null;
+}
+
+function isExplicitServiceChangeRequest(
+  extraction: LLMExtraction,
+  userMessage: string
+): boolean {
+  if (extraction.confirmation === 'CHANGE_SERVICE') return true;
+  const normalized = normalizeSignalText(userMessage);
+  return /\b(mudar|alterar|trocar|corrigir|change|switch)\b.*\b(servico|servicos|service)\b/.test(normalized) ||
+    /\b(outro|outra|different)\b.*\b(servico|servicos|service)\b/.test(normalized);
+}
+
+function isServiceLockedForState(context: ConversationContext): boolean {
+  return !!context.service_locked && SERVICE_LOCK_GUARDED_STATES.has(context.state);
+}
+
 function hasCompletedBookingMutationSignal(
   context: ConversationContext,
   extraction: LLMExtraction,
@@ -344,7 +405,7 @@ function hasCompletedBookingMutationSignal(
     return true;
   }
 
-  if (extraction.date_parsed || extraction.time_parsed) return true;
+  if (extraction.date_parsed || extraction.time_parsed || extraction.relative_time_direction) return true;
 
   const normalized = normalizeSignalText(userMessage);
   return /\b(alias|afinal|antes|depois|alterar|mudar|trocar|remarcar|reagendar|reschedule|change|instead|earlier|later)\b/.test(normalized);
@@ -383,6 +444,42 @@ function logTimeMatchDebug(
     match_type: matchType,
     available_slots_count: availableSlotsCount,
   });
+}
+
+function logTimeOperatorDebug(
+  userMessage: string,
+  extraction: LLMExtraction,
+  matchedSlotStart: string | null,
+  matchStrategy: string
+): void {
+  logFlow('[FLOW_DEBUG_TIME_OPERATOR]', {
+    raw_user_text: userMessage,
+    time_parsed: extraction.time_parsed ?? null,
+    time_operator: extraction.time_operator ?? null,
+    relative_time_direction: extraction.relative_time_direction ?? null,
+    matched_slot_start: matchedSlotStart,
+    match_strategy: matchStrategy,
+  });
+}
+
+function buildSlotSelectionUpdates(
+  context: ConversationContext,
+  selectedSlot: SlotSuggestion,
+  state: ConversationContext['state']
+): Partial<ConversationContext> {
+  const updates: Partial<ConversationContext> = {
+    selected_slot: selectedSlot,
+    preferred_date: extractDate(selectedSlot),
+    state,
+  };
+
+  if (context.reschedule_from_agendamento_id) {
+    updates.reschedule_new_slot = selectedSlot;
+    updates.reschedule_new_date = extractDate(selectedSlot);
+    updates.reschedule_new_time = extractTimeStart(selectedSlot);
+  }
+
+  return updates;
 }
 
 // =============================================================================
@@ -486,6 +583,8 @@ serve(async (req) => {
       state: context.state ?? null,
       current_intent: context.current_intent ?? null,
       service_id: context.service_id ?? null,
+      service_source: context.service_source ?? null,
+      service_locked: context.service_locked ?? false,
       preferred_date: context.preferred_date ?? null,
       selected_slot: summarizeSlotForLog(context.selected_slot),
       customer_name: context.customer_name ?? null,
@@ -511,9 +610,15 @@ serve(async (req) => {
       extraction = parseExtractionResponse('');
     }
     extraction = normalizeExtraction(extraction);
+    const inferredTimeRelation = inferTimeRelation(userMessage, extraction);
+    extraction = {
+      ...extraction,
+      time_operator: inferredTimeRelation.time_operator,
+      relative_time_direction: inferredTimeRelation.relative_time_direction,
+    };
     const originalIntent = extraction.intent;
     if (
-      extraction.time_parsed &&
+      (extraction.time_parsed || extraction.relative_time_direction) &&
       (
         ACTIVE_BOOKING_STATES.has(context.state) ||
         (context.state !== 'completed' && context.available_slots.length > 0) ||
@@ -532,6 +637,8 @@ serve(async (req) => {
       confirmation: extraction.confirmation ?? null,
       date_parsed: extraction.date_parsed ?? null,
       time_parsed: extraction.time_parsed ?? null,
+      time_operator: extraction.time_operator ?? null,
+      relative_time_direction: extraction.relative_time_direction ?? null,
       service_keywords: Array.isArray(extraction.service_keywords) ? extraction.service_keywords : [],
       confidence: extraction.confidence ?? null,
     });
@@ -618,20 +725,19 @@ serve(async (req) => {
       const previousSelectedSlotStart = updatedContext.selected_slot?.start ?? null;
       const previousAgendamentoId =
         updatedContext.agendamento_id ?? updatedContext.confirmed_snapshot?.agendamento_id ?? null;
-      const isExplicitReschedule = extraction.intent === 'RESCHEDULE';
+      const shouldRescheduleExistingBooking = !!previousAgendamentoId;
 
       updatedContext = await updateContext(conversationId, {
         state: 'collecting_data',
-        current_intent: isExplicitReschedule ? 'RESCHEDULE' : 'BOOKING_NEW',
+        current_intent: shouldRescheduleExistingBooking ? 'RESCHEDULE' : 'BOOKING_NEW',
         execution_id: null,
         agendamento_id: null,
-        confirmed_snapshot: null,
         booking_lifecycle_id: null,
         selected_slot: null,
         available_slots: [],
         slots_page: 0,
         slots_generated_for_date: null,
-        reschedule_from_agendamento_id: isExplicitReschedule ? previousAgendamentoId : null,
+        reschedule_from_agendamento_id: previousAgendamentoId,
         reschedule_new_date: null,
         reschedule_new_time: null,
         reschedule_new_slot: null,
@@ -644,9 +750,44 @@ serve(async (req) => {
         selected_slot_start: previousSelectedSlotStart,
         agendamento_id_in_context: previousAgendamentoId,
         execution_id_was_reset: true,
-        source_branch: isExplicitReschedule
+        source_branch: shouldRescheduleExistingBooking
           ? 'post_completed_reschedule_reset'
           : 'post_completed_change_reset',
+      });
+    }
+
+    const explicitServiceChange = isExplicitServiceChangeRequest(extraction, userMessage);
+    if (updatedContext.service_locked && explicitServiceChange) {
+      const previousServiceId = updatedContext.service_id ?? null;
+      updatedContext = await updateContext(conversationId, {
+        service_id: null,
+        service_name: null,
+        service_source: null,
+        service_locked: false,
+        selected_slot: null,
+        available_slots: [],
+        slots_page: 0,
+        slots_generated_for_date: null,
+        state: 'collecting_service',
+      }, updatedContext.context_version);
+
+      logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
+        previous_service_id: previousServiceId,
+        new_service_id: null,
+        service_locked: false,
+        source: 'explicit_service_change',
+        overwrite_prevented: false,
+      });
+    } else if (
+      isServiceLockedForState(updatedContext) &&
+      (hasSoftServiceSignal(extraction) || extraction.service_id)
+    ) {
+      logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
+        previous_service_id: updatedContext.service_id ?? null,
+        new_service_id: extraction.service_id ?? null,
+        service_locked: true,
+        source: updatedContext.service_source ?? 'unknown',
+        overwrite_prevented: true,
       });
     }
 
@@ -656,6 +797,8 @@ serve(async (req) => {
       state: updatedContext.state ?? null,
       current_intent: updatedContext.current_intent ?? null,
       service_id: updatedContext.service_id ?? null,
+      service_source: updatedContext.service_source ?? null,
+      service_locked: updatedContext.service_locked ?? false,
       customer_name: updatedContext.customer_name ?? null,
       customer_email: updatedContext.customer_email ?? null,
       preferred_date: updatedContext.preferred_date ?? null,
@@ -688,6 +831,7 @@ serve(async (req) => {
     // -------------------------------------------------------------------------
     if (
       !updatedContext.service_id &&
+      !isServiceLockedForState(updatedContext) &&
       intent !== 'HUMAN_REQUEST' &&
       (
         decision.action === 'ASK_SERVICE' ||
@@ -696,26 +840,26 @@ serve(async (req) => {
       )
     ) {
       const services = await loadServices(empresaId);
-      const combinedInput = [
-        userMessage,
-        updatedContext.customer_reason,
-        Array.isArray(extraction.service_keywords) ? extraction.service_keywords.join(' ') : '',
-      ].filter(Boolean).join(' ').trim();
+      const numericService = updatedContext.state === 'collecting_service'
+        ? resolveNumericServiceSelection(userMessage, services)
+        : null;
 
-      const serviceResult = await resolveService(combinedInput, empresaId, services);
-      logFlow('[FLOW_SERVICE]', {
-        conversation_id: conversationId,
-        service_id: serviceResult?.service_id ?? null,
-        service_name: serviceResult?.service_name ?? null,
-        confidence: serviceResult?.confidence ?? null,
-        method: serviceResult?.method ?? null,
-      });
-
-      if (serviceResult?.service_id) {
+      if (numericService) {
+        const previousServiceId = updatedContext.service_id ?? null;
         updatedContext = await updateContext(conversationId, {
-          service_id: serviceResult.service_id,
-          service_name: serviceResult.service_name,
+          service_id: numericService.id,
+          service_name: numericService.name,
+          service_source: 'menu_numeric_selection',
+          service_locked: true,
         }, updatedContext.context_version);
+
+        logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
+          previous_service_id: previousServiceId,
+          new_service_id: numericService.id,
+          service_locked: true,
+          source: 'menu_numeric_selection',
+          overwrite_prevented: false,
+        });
 
         decision = decideNextAction({
           context: updatedContext,
@@ -730,13 +874,58 @@ serve(async (req) => {
         });
 
         logFlow('[FLOW_DECISION]', {
-          stage: 'post_service_resolution',
+          stage: 'post_service_menu_selection',
           conversation_id: conversationId,
           action: decision.action,
           proposed_state: decision.proposed_state,
           confidence: decision.confidence,
           reason: decision.reason,
         });
+      } else {
+        const combinedInput = [
+          userMessage,
+          updatedContext.customer_reason,
+          Array.isArray(extraction.service_keywords) ? extraction.service_keywords.join(' ') : '',
+        ].filter(Boolean).join(' ').trim();
+
+        const serviceResult = await resolveService(combinedInput, empresaId, services);
+        logFlow('[FLOW_SERVICE]', {
+          conversation_id: conversationId,
+          service_id: serviceResult?.service_id ?? null,
+          service_name: serviceResult?.service_name ?? null,
+          confidence: serviceResult?.confidence ?? null,
+          method: serviceResult?.method ?? null,
+        });
+
+        if (serviceResult?.service_id) {
+          updatedContext = await updateContext(conversationId, {
+            service_id: serviceResult.service_id,
+            service_name: serviceResult.service_name,
+            service_source: serviceResult.method,
+            service_locked: false,
+          }, updatedContext.context_version);
+
+          decision = decideNextAction({
+            context: updatedContext,
+            extraction,
+            userMessage,
+            config: {
+              requirePhone,
+              requireReason,
+              allowSameDayBooking: bookingConfig?.allow_same_day_booking,
+              minimumAdvanceMinutes: bookingConfig?.minimum_advance_minutes,
+            },
+          });
+
+          logFlow('[FLOW_DECISION]', {
+            stage: 'post_service_resolution',
+            conversation_id: conversationId,
+            action: decision.action,
+            proposed_state: decision.proposed_state,
+            confidence: decision.confidence,
+            reason: decision.reason,
+          });
+        }
       }
     }
 
@@ -807,7 +996,19 @@ serve(async (req) => {
 
       const availableSlotsCount = updatedContext.available_slots.length;
       const requestedTime = extraction.time_parsed ?? '';
-      const match = findClosestSlot(requestedTime, updatedContext.available_slots);
+      const currentSlotForRelation = updatedContext.selected_slot ??
+        (updatedContext.confirmed_snapshot
+          ? {
+            start: updatedContext.confirmed_snapshot.start,
+            end: updatedContext.confirmed_snapshot.end,
+            resource_id: updatedContext.confirmed_snapshot.resource_id,
+          } as SlotSuggestion
+          : null);
+      const match = findClosestSlot(requestedTime, updatedContext.available_slots, {
+        time_operator: extraction.time_operator,
+        relative_time_direction: extraction.relative_time_direction,
+        current_slot: currentSlotForRelation,
+      });
       const matchedSlot = match.slot;
       logTimeMatchDebug(
         requestedTime || null,
@@ -815,6 +1016,7 @@ serve(async (req) => {
         match.match_type,
         availableSlotsCount
       );
+      logTimeOperatorDebug(userMessage, extraction, matchedSlot?.start ?? null, match.match_strategy);
 
       if (matchedSlot && (match.match_type === 'exact' || match.match_type === 'closest')) {
         const missingFieldLabels = getMissingBookingFieldLabels(
@@ -826,25 +1028,33 @@ serve(async (req) => {
         const matchedTime = extractTimeStart(matchedSlot) ?? buildSlotDisplay(matchedSlot);
         const closestPrefix = isExact
           ? null
-          : `Nao temos exatamente as ${requestedTime}, mas temos as ${matchedTime}. Pode ser?`;
+          : match.match_strategy === 'before'
+            ? `Para antes das ${requestedTime}, tenho as ${matchedTime}. Pode ser?`
+            : match.match_strategy === 'after'
+              ? `Para depois das ${requestedTime}, tenho as ${matchedTime}. Pode ser?`
+              : match.match_strategy === 'relative_earlier'
+                ? `Tenho uma opcao mais cedo as ${matchedTime}. Pode ser?`
+                : match.match_strategy === 'relative_later'
+                  ? `Tenho uma opcao mais tarde as ${matchedTime}. Pode ser?`
+                  : `Nao temos exatamente as ${requestedTime}, mas temos as ${matchedTime}. Pode ser?`;
 
         if (missingFieldLabels.length > 0) {
-          updatedContext = await updateContext(conversationId, {
-            selected_slot: matchedSlot,
-            preferred_date: extractDate(matchedSlot),
-            state: 'collecting_data',
-          }, updatedContext.context_version);
+          updatedContext = await updateContext(
+            conversationId,
+            buildSlotSelectionUpdates(updatedContext, matchedSlot, 'collecting_data'),
+            updatedContext.context_version
+          );
 
           const dataPrompt = buildMissingDataPrompt(missingFieldLabels);
           reply = closestPrefix ? `${closestPrefix}\n\n${dataPrompt}` : dataPrompt;
           return;
         }
 
-        updatedContext = await updateContext(conversationId, {
-          selected_slot: matchedSlot,
-          preferred_date: extractDate(matchedSlot),
-          state: 'awaiting_confirmation',
-        }, updatedContext.context_version);
+        updatedContext = await updateContext(
+          conversationId,
+          buildSlotSelectionUpdates(updatedContext, matchedSlot, 'awaiting_confirmation'),
+          updatedContext.context_version
+        );
 
         reply = isExact
           ? HARDCODED_TEMPLATES.awaiting_confirmation(buildConfirmedSnapshot(updatedContext, matchedSlot))
@@ -858,14 +1068,100 @@ serve(async (req) => {
       updatedContext = await updateContext(conversationId, {
         available_slots: orderedSlots,
         selected_slot: null,
+        reschedule_new_slot: null,
         state: 'awaiting_slot_selection',
       }, updatedContext.context_version);
 
+      const fallbackIntro = match.match_strategy === 'before'
+        ? `Nao encontrei horario disponivel antes das ${requestedTime}. Estes sao os horarios mais proximos:`
+        : match.match_strategy === 'after'
+          ? `Nao encontrei horario disponivel depois das ${requestedTime}. Estes sao os horarios mais proximos:`
+          : match.match_strategy === 'relative_earlier'
+            ? 'Nao encontrei uma opcao mais cedo. Estes sao os horarios mais proximos:'
+            : match.match_strategy === 'relative_later'
+              ? 'Nao encontrei uma opcao mais tarde. Estes sao os horarios mais proximos:'
+              : `Nao encontrei um horario proximo de ${requestedTime}. Estes sao os horarios mais proximos:`;
+
       reply = buildSlotsPresentationReply(
         updatedContext.available_slots,
-        `Nao encontrei um horario proximo de ${requestedTime}. Estes sao os horarios mais proximos:`,
+        fallbackIntro,
         'Indique o numero do horario que prefere.'
       );
+    };
+
+    const processRescheduleBooking = async (source: 'decision' | 'legacy_confirmation') => {
+      logFlow('[FLOW_BRANCH]', {
+        conversation_id: conversationId,
+        branch: 'EXECUTE_RESCHEDULE',
+        source,
+        state: updatedContext.state ?? null,
+      });
+
+      if (!updatedContext.selected_slot) {
+        reply = 'Para remarcar, preciso que escolha primeiro o novo horario.';
+        return;
+      }
+
+      const creditReschedule = await checkCredits(empresaId, 'booking_reschedule');
+      if (!creditReschedule.allowed) {
+        reply = 'Nao foi possivel remarcar o agendamento: creditos insuficientes.';
+        return;
+      }
+
+      if (!updatedContext.reschedule_new_slot) {
+        updatedContext = await updateContext(conversationId, {
+          reschedule_new_slot: updatedContext.selected_slot,
+          reschedule_new_date: extractDate(updatedContext.selected_slot),
+          reschedule_new_time: extractTimeStart(updatedContext.selected_slot),
+        }, updatedContext.context_version);
+      }
+
+      const result = await executeReschedule(updatedContext, empresaId, agentId, conversationId);
+      if (result.success) {
+        const snapshot = {
+          service_id: updatedContext.service_id!,
+          service_name: updatedContext.service_name!,
+          start: updatedContext.selected_slot.start,
+          end: updatedContext.selected_slot.end,
+          resource_id: updatedContext.selected_slot.resource_id,
+          customer_name: updatedContext.customer_name!,
+          customer_email: updatedContext.customer_email!,
+          customer_phone: updatedContext.customer_phone ?? null,
+          agendamento_id: result.agendamento_id,
+        };
+
+        updatedContext = await updateContext(conversationId, {
+          state: 'completed',
+          agendamento_id: result.agendamento_id,
+          confirmed_snapshot: snapshot,
+          reschedule_from_agendamento_id: null,
+          reschedule_new_date: null,
+          reschedule_new_time: null,
+          reschedule_new_slot: null,
+          error_context: resetErrorCount(updatedContext.error_context),
+        }, updatedContext.context_version);
+
+        reply = HARDCODED_TEMPLATES.booking_confirmed(buildConfirmedSnapshot(updatedContext));
+        return;
+      }
+
+      if (result.error_code === 'SLOT_CONFLICT') {
+        const { updatedErrorState } = handleSystemError(
+          updatedContext.error_context,
+          'slot_conflict',
+          true,
+        );
+        updatedContext = await updateContext(conversationId, {
+          state: 'awaiting_slot_selection',
+          selected_slot: null,
+          reschedule_new_slot: null,
+          error_context: updatedErrorState,
+        }, updatedContext.context_version);
+        reply = ERROR_MESSAGES.system.slot_conflict;
+        return;
+      }
+
+      reply = result.error ?? ERROR_MESSAGES.system.retry;
     };
 
     const processCreateBooking = async (source: 'decision' | 'legacy_confirmation') => {
@@ -875,6 +1171,11 @@ serve(async (req) => {
         source,
         state: updatedContext.state ?? null,
       });
+
+      if (updatedContext.reschedule_from_agendamento_id && updatedContext.selected_slot) {
+        await processRescheduleBooking(source);
+        return;
+      }
 
       const creditBooking = await checkCredits(empresaId, 'booking_create');
       if (!creditBooking.allowed) {
@@ -1241,39 +1542,48 @@ serve(async (req) => {
           state: updatedContext.state ?? null,
         });
 
+        const bookingFlowIntent = updatedContext.reschedule_from_agendamento_id ? 'RESCHEDULE' : 'BOOKING_NEW';
         const orchestrationContext = {
           ...updatedContext,
           state: 'collecting_data' as const,
-          current_intent: 'BOOKING_NEW' as const,
+          current_intent: bookingFlowIntent,
         };
         const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason);
         updatedContext = await updateContext(conversationId, {
           ...orchestration.context_updates,
-          current_intent: 'BOOKING_NEW',
+          current_intent: bookingFlowIntent,
         }, updatedContext.context_version);
 
-        const hasSlots =
-          orchestration.action === 'SHOW_SLOTS' ||
-          orchestration.action === 'SHOW_EXISTING_SLOTS' ||
-          orchestration.action === 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES' ||
-          orchestration.action === 'SINGLE_SLOT_CONFIRM' ||
-          orchestration.action === 'PROACTIVE_SLOTS';
-        const slotReply = buildOrchestrationSlotsReply(
-          orchestration.action,
-          hasSlots ? (orchestration.slots ?? null) : null
-        );
-
-        if (slotReply) {
-          reply = slotReply;
+        if (
+          (extraction.time_parsed || extraction.relative_time_direction) &&
+          updatedContext.available_slots.length > 0
+        ) {
+          await processTimeBasedSlotSearch('decision');
+          // Time-based generation is fully handled here; do not also present the generic list.
         } else {
-          reply = await generateResponse(
-            userMessage,
-            updatedContext,
-            orchestration.response_hint,
-            hasSlots ? (orchestration.slots ?? null) : null,
-            agentCtx,
-            empresaId,
+          const hasSlots =
+            orchestration.action === 'SHOW_SLOTS' ||
+            orchestration.action === 'SHOW_EXISTING_SLOTS' ||
+            orchestration.action === 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES' ||
+            orchestration.action === 'SINGLE_SLOT_CONFIRM' ||
+            orchestration.action === 'PROACTIVE_SLOTS';
+          const slotReply = buildOrchestrationSlotsReply(
+            orchestration.action,
+            hasSlots ? (orchestration.slots ?? null) : null
           );
+
+          if (slotReply) {
+            reply = slotReply;
+          } else {
+            reply = await generateResponse(
+              userMessage,
+              updatedContext,
+              orchestration.response_hint,
+              hasSlots ? (orchestration.slots ?? null) : null,
+              agentCtx,
+              empresaId,
+            );
+          }
         }
 
       } else if (decision.action === 'SHOW_SLOTS' && updatedContext.available_slots.length > 0) {
@@ -1320,11 +1630,11 @@ serve(async (req) => {
           );
 
           if (missingFieldLabels.length > 0) {
-            updatedContext = await updateContext(conversationId, {
-              selected_slot: selectedSlot,
-              preferred_date: extractDate(selectedSlot),
-              state: 'collecting_data',
-            }, updatedContext.context_version);
+            updatedContext = await updateContext(
+              conversationId,
+              buildSlotSelectionUpdates(updatedContext, selectedSlot, 'collecting_data'),
+              updatedContext.context_version
+            );
 
             const directive = buildResponseDirective({
               state: updatedContext.state,
@@ -1347,11 +1657,11 @@ serve(async (req) => {
               empresaId,
             );
           } else {
-            updatedContext = await updateContext(conversationId, {
-              selected_slot: selectedSlot,
-              preferred_date: extractDate(selectedSlot),
-              state: 'awaiting_confirmation',
-            }, updatedContext.context_version);
+            updatedContext = await updateContext(
+              conversationId,
+              buildSlotSelectionUpdates(updatedContext, selectedSlot, 'awaiting_confirmation'),
+              updatedContext.context_version
+            );
 
             reply = HARDCODED_TEMPLATES.awaiting_confirmation(
               buildConfirmedSnapshot(updatedContext, selectedSlot)
@@ -1405,6 +1715,13 @@ serve(async (req) => {
           }
         }
 
+      } else if (decision.action === 'EXECUTE_RESCHEDULE') {
+        if (updatedContext.selected_slot) {
+          await processRescheduleBooking('decision');
+        } else {
+          reply = 'Para remarcar, preciso que escolha primeiro o novo horario.';
+        }
+
       // === 9d.1 awaiting_confirmation ===
       } else if (updatedContext.state === 'awaiting_confirmation') {
         logFlow('[FLOW_BRANCH]', {
@@ -1449,11 +1766,11 @@ serve(async (req) => {
             );
             if (selectedSlot) {
               // New time matched existing slot → update selection, stay in confirmation
-              updatedContext = await updateContext(conversationId, {
-                selected_slot: selectedSlot,
-                preferred_date: extractDate(selectedSlot) ?? currentDate,
-                state: 'awaiting_confirmation',
-              }, updatedContext.context_version);
+              updatedContext = await updateContext(
+                conversationId,
+                buildSlotSelectionUpdates(updatedContext, selectedSlot, 'awaiting_confirmation'),
+                updatedContext.context_version
+              );
               reply = HARDCODED_TEMPLATES.awaiting_confirmation(buildConfirmedSnapshot(updatedContext, selectedSlot));
             } else {
               // New time NOT in existing slots → re-show same slots, no new search
@@ -1507,11 +1824,11 @@ serve(async (req) => {
         if (selectedSlot) {
           const missingPersonal = !updatedContext.customer_name || !updatedContext.customer_email;
           if (missingPersonal) {
-            updatedContext = await updateContext(conversationId, {
-              selected_slot: selectedSlot,
-              preferred_date: extractDate(selectedSlot),
-              state: 'collecting_data',
-            }, updatedContext.context_version);
+            updatedContext = await updateContext(
+              conversationId,
+              buildSlotSelectionUpdates(updatedContext, selectedSlot, 'collecting_data'),
+              updatedContext.context_version
+            );
             const missingFields: string[] = [];
             if (!updatedContext.customer_name) missingFields.push('nome completo');
             if (!updatedContext.customer_email) missingFields.push('email');
@@ -1536,11 +1853,11 @@ serve(async (req) => {
               empresaId,
             );
           } else {
-            updatedContext = await updateContext(conversationId, {
-              selected_slot: selectedSlot,
-              preferred_date: extractDate(selectedSlot),
-              state: 'awaiting_confirmation',
-            }, updatedContext.context_version);
+            updatedContext = await updateContext(
+              conversationId,
+              buildSlotSelectionUpdates(updatedContext, selectedSlot, 'awaiting_confirmation'),
+              updatedContext.context_version
+            );
             reply = HARDCODED_TEMPLATES.awaiting_confirmation(buildConfirmedSnapshot(updatedContext, selectedSlot));
           }
         } else {

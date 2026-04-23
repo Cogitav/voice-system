@@ -19,6 +19,7 @@ export interface TimeSlotMatchResult {
   slot: SlotSuggestion | null;
   selected_index: number | null;
   match_type: 'exact' | 'closest' | 'fallback';
+  match_strategy: 'exact' | 'closest_future' | 'closest_overall' | 'before' | 'after' | 'relative_earlier' | 'relative_later' | 'fallback';
   ordered_slots: SlotSuggestion[];
 }
 
@@ -215,17 +216,25 @@ function getSlotStartMinutes(slot: SlotSuggestion): number | null {
 
 export function findClosestSlot(
   timeParsed: string,
-  availableSlots: SlotSuggestion[]
+  availableSlots: SlotSuggestion[],
+  options: {
+    time_operator?: 'exact' | 'before' | 'after' | null;
+    relative_time_direction?: 'earlier' | 'later' | null;
+    current_slot?: SlotSuggestion | null;
+  } = {}
 ): TimeSlotMatchResult {
   const requestedMinutes = parseTimeToMinutes(timeParsed);
+  const currentSlotMinutes = options.current_slot ? getSlotStartMinutes(options.current_slot) : null;
+  const relationTargetMinutes = requestedMinutes ?? currentSlotMinutes;
   const fallbackResult: TimeSlotMatchResult = {
     slot: null,
     selected_index: null,
     match_type: 'fallback',
+    match_strategy: 'fallback',
     ordered_slots: availableSlots,
   };
 
-  if (requestedMinutes === null || availableSlots.length === 0) {
+  if (availableSlots.length === 0) {
     return fallbackResult;
   }
 
@@ -233,18 +242,125 @@ export function findClosestSlot(
     .map((slot, index) => {
       const minutes = getSlotStartMinutes(slot);
       if (minutes === null) return null;
+      const distanceTarget = requestedMinutes ?? currentSlotMinutes;
       return {
         slot,
         selected_index: index + 1,
         minutes,
-        distance: Math.abs(minutes - requestedMinutes),
-        futureDistance: minutes >= requestedMinutes ? minutes - requestedMinutes : null,
+        distance: distanceTarget === null ? 0 : Math.abs(minutes - distanceTarget),
+        futureDistance: requestedMinutes !== null && minutes >= requestedMinutes ? minutes - requestedMinutes : null,
       };
     })
     .filter((candidate): candidate is TimeSlotCandidate => candidate !== null);
 
   if (candidates.length === 0) {
     return fallbackResult;
+  }
+
+  const sortByDistanceTo = (targetMinutes: number) => [...candidates].sort((a, b) => {
+    const aDistance = Math.abs(a.minutes - targetMinutes);
+    const bDistance = Math.abs(b.minutes - targetMinutes);
+    if (aDistance !== bDistance) return aDistance - bDistance;
+    return a.minutes - b.minutes;
+  });
+
+  if (relationTargetMinutes !== null && options.relative_time_direction === 'earlier') {
+    const earlier = candidates
+      .filter((candidate) => candidate.minutes < relationTargetMinutes)
+      .sort((a, b) => b.minutes - a.minutes)[0];
+
+    const ordered_slots = sortByDistanceTo(relationTargetMinutes).map((candidate) => candidate.slot);
+    return earlier
+      ? {
+        slot: earlier.slot,
+        selected_index: earlier.selected_index,
+        match_type: 'closest',
+        match_strategy: 'relative_earlier',
+        ordered_slots,
+      }
+      : {
+        slot: null,
+        selected_index: null,
+        match_type: 'fallback',
+        match_strategy: 'relative_earlier',
+        ordered_slots,
+      };
+  }
+
+  if (relationTargetMinutes !== null && options.relative_time_direction === 'later') {
+    const later = candidates
+      .filter((candidate) => candidate.minutes > relationTargetMinutes)
+      .sort((a, b) => a.minutes - b.minutes)[0];
+
+    const ordered_slots = sortByDistanceTo(relationTargetMinutes).map((candidate) => candidate.slot);
+    return later
+      ? {
+        slot: later.slot,
+        selected_index: later.selected_index,
+        match_type: 'closest',
+        match_strategy: 'relative_later',
+        ordered_slots,
+      }
+      : {
+        slot: null,
+        selected_index: null,
+        match_type: 'fallback',
+        match_strategy: 'relative_later',
+        ordered_slots,
+      };
+  }
+
+  if (requestedMinutes === null) {
+    return {
+      ...fallbackResult,
+      ordered_slots: relationTargetMinutes !== null
+        ? sortByDistanceTo(relationTargetMinutes).map((candidate) => candidate.slot)
+        : availableSlots,
+    };
+  }
+
+  if (options.time_operator === 'before') {
+    const before = candidates
+      .filter((candidate) => candidate.minutes < requestedMinutes)
+      .sort((a, b) => b.minutes - a.minutes)[0];
+    const ordered_slots = sortByDistanceTo(requestedMinutes).map((candidate) => candidate.slot);
+    return before
+      ? {
+        slot: before.slot,
+        selected_index: before.selected_index,
+        match_type: 'closest',
+        match_strategy: 'before',
+        ordered_slots,
+      }
+      : {
+        slot: null,
+        selected_index: null,
+        match_type: 'fallback',
+        match_strategy: 'before',
+        ordered_slots,
+      };
+  }
+
+  if (options.time_operator === 'after') {
+    const after = candidates
+      .filter((candidate) => candidate.minutes > requestedMinutes)
+      .sort((a, b) => a.minutes - b.minutes)[0];
+    const ordered_slots = sortByDistanceTo(requestedMinutes).map((candidate) => candidate.slot);
+    return after
+      ? {
+        slot: after.slot,
+        selected_index: after.selected_index,
+        match_type: 'closest',
+        match_strategy: 'after',
+        ordered_slots,
+      }
+      : {
+        slot: null,
+        selected_index: null,
+        match_type: 'fallback',
+        match_strategy: 'after',
+        ordered_slots,
+      };
   }
 
   const orderedCandidates = [...candidates].sort((a, b) => {
@@ -261,6 +377,7 @@ export function findClosestSlot(
       slot: exact.slot,
       selected_index: exact.selected_index,
       match_type: 'exact',
+      match_strategy: 'exact',
       ordered_slots,
     };
   }
@@ -278,6 +395,7 @@ export function findClosestSlot(
       slot: closestFuture.slot,
       selected_index: closestFuture.selected_index,
       match_type: 'closest',
+      match_strategy: 'closest_future',
       ordered_slots,
     };
   }
@@ -288,6 +406,7 @@ export function findClosestSlot(
       slot: closestOverall.slot,
       selected_index: closestOverall.selected_index,
       match_type: 'closest',
+      match_strategy: 'closest_overall',
       ordered_slots,
     };
   }
@@ -296,6 +415,7 @@ export function findClosestSlot(
     slot: closestOverall.slot,
     selected_index: closestOverall.selected_index,
     match_type: 'fallback',
+    match_strategy: 'fallback',
     ordered_slots,
   };
 }

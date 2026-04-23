@@ -9,6 +9,8 @@ export function createEmptyContext(): ConversationContext {
     current_intent: null,
     service_id: null,
     service_name: null,
+    service_source: null,
+    service_locked: false,
     preferred_date: null,
     preferred_time: null,
     available_slots: [],
