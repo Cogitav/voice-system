@@ -1695,6 +1695,39 @@ serve(async (req) => {
         return;
       }
 
+      if (result.error_code === 'DB_ERROR') {
+        const { updatedErrorState, shouldHandoff } = handleSystemError(
+          updatedContext.error_context,
+          'booking_creation_failed',
+          false,
+        );
+        const recoveryState = updatedContext.selected_slot ? 'awaiting_confirmation' : 'awaiting_slot_selection';
+        updatedContext = await updateContext(conversationId, {
+          state: recoveryState,
+          error_context: updatedErrorState,
+          last_error: result.error,
+        }, updatedContext.context_version);
+
+        logFlow('[FLOW_DEBUG_BOOKING_RECOVERY]', {
+          conversation_id: conversationId,
+          error_code: result.error_code,
+          restored_state: recoveryState,
+          selected_slot_start: updatedContext.selected_slot?.start ?? null,
+          selected_slot_end: updatedContext.selected_slot?.end ?? null,
+          available_slots_count: updatedContext.available_slots?.length ?? 0,
+        });
+
+        if (shouldHandoff) {
+          await triggerHandoff(conversationId, empresaId, updatedContext, 'Booking creation failed repeatedly');
+          reply = ERROR_MESSAGES.system.general_failure;
+        } else if (updatedContext.selected_slot) {
+          reply = 'Houve um problema tecnico ao criar o agendamento. O horario continua selecionado; pode responder "sim" para tentar novamente ou escolher outro horario.';
+        } else {
+          reply = 'Houve um problema tecnico ao criar o agendamento. Pode escolher novamente um dos horarios disponiveis.';
+        }
+        return;
+      }
+
       const { updatedErrorState, shouldHandoff } = handleSystemError(
         updatedContext.error_context,
         'booking_creation_failed',

@@ -6,6 +6,15 @@ import { log, logAction } from './logger.ts';
 import { guardBookingExecution } from './guardrails.ts';
 import { randomUUID } from 'https://deno.land/std@0.177.0/node/crypto.ts';
 
+function redactBookingInsertPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...payload,
+    cliente_nome: payload.cliente_nome ? '[REDACTED]' : null,
+    cliente_telefone: payload.cliente_telefone ? '[REDACTED]' : null,
+    notas: payload.notas ? '[REDACTED]' : null,
+  };
+}
+
 export async function executeBooking(
   context: ConversationContext,
   empresaId: string,
@@ -167,28 +176,29 @@ export async function executeBooking(
     }
   }
 
-  // Insert booking
+  // Insert booking. Keep this payload aligned with the real agendamentos schema.
+  const insertPayload = {
+    empresa_id: empresaId,
+    service_id: context.service_id,
+    resource_id: slot.resource_id || null,
+    agente_id: agentId,
+    data: dataStr,
+    hora: horaStr,
+    start_datetime: slot.start,
+    end_datetime: slot.end,
+    duration_minutes: service?.duration_minutes ?? 30,
+    estado: 'confirmado',
+    scheduling_state: 'confirmed',
+    cliente_nome: context.customer_name,
+    cliente_telefone: context.customer_phone ?? null,
+    notas: context.customer_reason ?? null,
+    execution_id: executionId,
+    credits_consumed: 5,
+  };
+
   const { data: booking, error: bookingError } = await db
     .from('agendamentos')
-    .insert({
-      empresa_id: empresaId,
-      service_id: context.service_id,
-      resource_id: slot.resource_id || null,
-      agente_id: agentId,
-      data: dataStr,
-      hora: horaStr,
-      start_datetime: slot.start,
-      end_datetime: slot.end,
-      duration_minutes: service?.duration_minutes ?? 30,
-      estado: 'confirmado',
-      scheduling_state: 'confirmed',
-      cliente_nome: context.customer_name,
-      cliente_email: context.customer_email,
-      cliente_telefone: context.customer_phone ?? null,
-      notas: context.customer_reason ?? null,
-      execution_id: executionId,
-      credits_consumed: 5,
-    })
+    .insert(insertPayload)
     .select('id')
     .single();
 
@@ -198,7 +208,16 @@ export async function executeBooking(
       conversation_id: conversationId,
       event_type: 'BOOKING_INSERT_FAILED',
       message: bookingError?.message ?? 'Unknown error',
-      payload: { executionId, service_id: context.service_id },
+      payload: {
+        execution_id: executionId,
+        booking_error: {
+          message: bookingError?.message ?? null,
+          code: bookingError?.code ?? null,
+          details: bookingError?.details ?? null,
+          hint: bookingError?.hint ?? null,
+        },
+        insert_payload: redactBookingInsertPayload(insertPayload),
+      },
     }, 'error');
     return { success: false, agendamento_id: null, error: 'Erro ao criar agendamento.', error_code: 'DB_ERROR' };
   }
