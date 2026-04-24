@@ -85,6 +85,13 @@ export interface SchedulingService {
   bookable: boolean;
   price: number | null;
   currency: string;
+  promo_price?: number | null;
+  promo_start?: string | null;
+  promo_end?: string | null;
+  promo_start_date?: string | null;
+  promo_end_date?: string | null;
+  requires_triage?: boolean | null;
+  category?: string | null;
 }
 
 export interface CustomerData {

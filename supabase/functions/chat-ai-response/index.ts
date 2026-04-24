@@ -306,6 +306,137 @@ function logFlow(prefix: string, payload: Record<string, unknown>): void {
   console.log(prefix, JSON.stringify(payload));
 }
 
+function extractExplicitPtTime(userMessage: string): string | null {
+  const normalized = normalizeSignalText(userMessage).replace(/\s+/g, ' ').trim();
+  const patterns = [
+    /\b(?:para\s+)?(?:as|a|pelas)\s+(\d{1,2})\s*h\s*(\d{2})?\b/,
+    /\b(?:para\s+)?(?:as|a|pelas)\s+(\d{1,2})[:.](\d{2})\b/,
+    /\b(\d{1,2})\s*h\s*(\d{2})?\b/,
+    /\b(\d{1,2})[:.](\d{2})\b/,
+    /\b(?:para\s+)?(?:as|a|pelas)\s+(\d{1,2})(?:\s+horas?)?\b/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+
+    const hour = Number(match[1]);
+    const minute = match[2] ? Number(match[2]) : 0;
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) continue;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) continue;
+
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
+
+  return null;
+}
+
+function isPriceQuestion(userMessage: string): boolean {
+  const normalized = normalizeSignalText(userMessage);
+  return /\b(preco|precos|custa|custam|custo|custos|valor|valores|tarifa|eur|euro|euros|promocao|promocoes|promo)\b/.test(normalized) ||
+    /\bquanto\s+(custa|custam|e|fica|vale)\b/.test(normalized) ||
+    /€/.test(userMessage);
+}
+
+function normalizeComparable(value: string | null | undefined): string {
+  return (value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function findServiceById(services: SchedulingService[], serviceId: string | null | undefined): SchedulingService | null {
+  if (!serviceId) return null;
+  return services.find((service) => service.id === serviceId) ?? null;
+}
+
+function findServiceByText(services: SchedulingService[], userMessage: string, extraction: LLMExtraction): SchedulingService | null {
+  const normalizedMessage = normalizeComparable([
+    userMessage,
+    ...(Array.isArray(extraction.service_keywords) ? extraction.service_keywords : []),
+  ].join(' '));
+
+  if (!normalizedMessage) return null;
+
+  let best: { service: SchedulingService; score: number } | null = null;
+  for (const service of services) {
+    const serviceName = normalizeComparable(service.name);
+    const serviceDescription = normalizeComparable(service.description);
+    let score = 0;
+
+    if (serviceName && normalizedMessage.includes(serviceName)) score += 100;
+    for (const word of serviceName.split(/\s+/).filter((part) => part.length > 3)) {
+      if (normalizedMessage.includes(word)) score += 30;
+    }
+    for (const word of serviceDescription.split(/\s+/).filter((part) => part.length > 4)) {
+      if (normalizedMessage.includes(word)) score += 10;
+    }
+
+    if (score > (best?.score ?? 0)) {
+      best = { service, score };
+    }
+  }
+
+  return best && best.score >= 30 ? best.service : null;
+}
+
+function toMoneyNumber(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const numberValue = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function isPromoActive(service: SchedulingService, now: Date): boolean {
+  const start = service.promo_start_date ?? service.promo_start ?? null;
+  const end = service.promo_end_date ?? service.promo_end ?? null;
+  if (!start && !end) return true;
+
+  const startDate = start ? new Date(start) : null;
+  const endDate = end ? new Date(end) : null;
+  if (startDate && Number.isNaN(startDate.getTime())) return false;
+  if (endDate && Number.isNaN(endDate.getTime())) return false;
+  if (startDate && now < startDate) return false;
+  if (endDate && now > endDate) return false;
+  return true;
+}
+
+function formatServicePrice(amount: number, currency: string | null | undefined): string {
+  const formatted = Number.isInteger(amount) ? String(amount) : amount.toFixed(2).replace(/\.?0+$/, '');
+  return (currency ?? 'EUR').toUpperCase() === 'EUR' ? `${formatted} €` : `${formatted} ${currency ?? 'EUR'}`;
+}
+
+function buildServicePriceAnswer(service: SchedulingService, now: Date): string | null {
+  const price = toMoneyNumber(service.price);
+  const promoPrice = toMoneyNumber(service.promo_price);
+  const currency = service.currency ?? 'EUR';
+
+  if (price === null && promoPrice === null) return null;
+  if (promoPrice !== null && isPromoActive(service, now)) {
+    const original = price !== null ? ` em vez de ${formatServicePrice(price, currency)}` : '';
+    return `${service.name} esta em promocao por ${formatServicePrice(promoPrice, currency)}${original}. Quer marcar?`;
+  }
+  if (price !== null) {
+    return `${service.name} tem o preco de ${formatServicePrice(price, currency)}. Quer marcar?`;
+  }
+  return null;
+}
+
+function shouldRequireReasonForRuntime(bookingConfig: Record<string, unknown> | null | undefined): boolean {
+  // Legacy booking_configuration.require_reason was created with a default true, so it is not a safe opt-in signal.
+  // Phase 1 keeps reason optional until explicit triage/service metadata exists.
+  return bookingConfig?.require_reason_explicit === true;
+}
+
+function serviceRequiresReason(service: SchedulingService | null): boolean {
+  if (!service) return false;
+  if (service.requires_triage === true) return true;
+  const category = normalizeComparable(service.category);
+  return /\b(triage|triagem)\b/.test(category);
+}
+
 function hasSoftServiceSignal(extraction: LLMExtraction): boolean {
   return Array.isArray(extraction.service_keywords) &&
     extraction.service_keywords.some((keyword) => typeof keyword === 'string' && keyword.trim().length > 0) &&
@@ -749,7 +880,8 @@ serve(async (req) => {
       .maybeSingle();
 
     const requirePhone = true;
-    const requireReason = bookingConfig?.require_reason ?? false;
+    const companyRequiresReason = shouldRequireReasonForRuntime(bookingConfig as Record<string, unknown> | null);
+    let requireReason = companyRequiresReason;
 
     const agentId = agent?.id ?? '';
     const agentPrompt = `${agent?.prompt_base ?? ''}\n${agent?.regras ?? ''}`.trim();
@@ -806,6 +938,20 @@ serve(async (req) => {
       extraction = parseExtractionResponse('');
     }
     extraction = normalizeExtraction(extraction);
+    const explicitTime = extractExplicitPtTime(userMessage);
+    if (explicitTime) {
+      extraction = {
+        ...extraction,
+        time_raw: explicitTime,
+        time_parsed: explicitTime,
+        time_operator: 'exact',
+        relative_time_direction: null,
+        intent: context.state === 'completed' && (context.agendamento_id || context.confirmed_snapshot)
+          ? 'RESCHEDULE'
+          : extraction.intent,
+        confidence: Math.max(extraction.confidence ?? 0, 0.9),
+      };
+    }
     const dateNormalization = normalizeFuzzyPtDate(userMessage, new Date(), timezone);
     let dateNormalizerClarification: string | null = null;
     if (dateNormalization.confidence) {
@@ -969,6 +1115,8 @@ serve(async (req) => {
         available_slots: [],
         slots_page: 0,
         slots_generated_for_date: null,
+        preferred_date: extraction.date_parsed ?? updatedContext.preferred_date ?? updatedContext.confirmed_snapshot?.start.slice(0, 10) ?? null,
+        preferred_time: extraction.time_parsed ?? updatedContext.preferred_time ?? null,
         reschedule_from_agendamento_id: previousAgendamentoId,
         reschedule_new_date: null,
         reschedule_new_time: null,
@@ -1009,6 +1157,11 @@ serve(async (req) => {
       menuServicesCache ??= await loadMenuServices(empresaId);
       return menuServicesCache;
     };
+
+    if (updatedContext.service_id) {
+      const currentService = findServiceById(await getServices(), updatedContext.service_id);
+      requireReason = companyRequiresReason || serviceRequiresReason(currentService);
+    }
 
     const explicitServiceChange = isExplicitServiceChangeRequest(extraction, userMessage);
     let serviceChangedThisTurn = false;
@@ -1052,6 +1205,8 @@ serve(async (req) => {
         };
         intent = extraction.intent;
         serviceChangedThisTurn = true;
+        requireReason = companyRequiresReason ||
+          serviceRequiresReason(findServiceById(services, serviceResult.service_id));
 
         logFlow('[FLOW_SERVICE_CHANGE]', {
           conversation_id: conversationId,
@@ -1183,6 +1338,7 @@ serve(async (req) => {
           intent: 'BOOKING_NEW',
         };
         intent = extraction.intent;
+        requireReason = companyRequiresReason || serviceRequiresReason(numericService);
 
         logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
           previous_service_id: previousServiceId,
@@ -1239,6 +1395,7 @@ serve(async (req) => {
           service_source: 'menu_numeric_selection',
           service_locked: true,
         }, updatedContext.context_version);
+        requireReason = companyRequiresReason || serviceRequiresReason(numericService);
 
         logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
           previous_service_id: previousServiceId,
@@ -1285,6 +1442,9 @@ serve(async (req) => {
         });
 
         if (serviceResult?.service_id) {
+          requireReason = companyRequiresReason ||
+            serviceRequiresReason(findServiceById(services, serviceResult.service_id));
+
           updatedContext = await updateContext(conversationId, {
             service_id: serviceResult.service_id,
             service_name: serviceResult.service_name,
@@ -1842,7 +2002,45 @@ serve(async (req) => {
     };
 
     // --- 9a. INFO_REQUEST → knowledge base, no state change ---
-    if (!decisionActionSupported) {
+    if (isPriceQuestion(userMessage)) {
+      const services = await getServices();
+      const currentService = findServiceById(services, updatedContext.service_id);
+      let matchedService = currentService;
+      let lookupSource = currentService ? 'current_service' : 'none';
+      let priceAnswer = matchedService ? buildServicePriceAnswer(matchedService, new Date()) : null;
+
+      if (!priceAnswer) {
+        const serviceFromText = findServiceByText(services, userMessage, extraction);
+        if (serviceFromText) {
+          matchedService = serviceFromText;
+          lookupSource = 'message_service_match';
+          priceAnswer = buildServicePriceAnswer(serviceFromText, new Date());
+        }
+      }
+
+      logFlow('[FLOW_SERVICE_PRICE_LOOKUP]', {
+        conversation_id: conversationId,
+        current_service_id: currentService?.id ?? null,
+        current_service_name: currentService?.name ?? null,
+        matched_service_id: matchedService?.id ?? null,
+        matched_service_name: matchedService?.name ?? null,
+        lookup_source: lookupSource,
+        has_configured_price: !!priceAnswer,
+      });
+
+      reply = priceAnswer ??
+        (matchedService
+          ? `Nao tenho preco configurado para ${matchedService.name}. Quer que avancemos com a marcacao?`
+          : 'Nao consegui identificar o servico para consultar o preco. Pode indicar qual o servico?');
+
+      logFlow('[FLOW_SERVICE_PRICE_ANSWER]', {
+        conversation_id: conversationId,
+        service_id: matchedService?.id ?? null,
+        service_name: matchedService?.name ?? null,
+        answered_from_service_config: !!priceAnswer,
+      });
+
+    } else if (!decisionActionSupported) {
       logFlow('[FLOW_BRANCH]', {
         conversation_id: conversationId,
         branch: 'UNSUPPORTED_DECISION_ACTION',
@@ -1936,35 +2134,74 @@ serve(async (req) => {
         source: decision.action === 'START_RESCHEDULE' ? 'decision' : 'legacy_non_active_only',
       });
 
+      const resolvedRescheduleDate =
+        extraction.date_parsed ??
+        updatedContext.preferred_date ??
+        updatedContext.confirmed_snapshot?.start.slice(0, 10) ??
+        null;
+      const resolvedRescheduleTime = extraction.time_parsed ?? updatedContext.preferred_time ?? null;
       updatedContext = await updateContext(conversationId, {
         state: 'collecting_data',
         current_intent: 'RESCHEDULE' as any,
         reschedule_from_agendamento_id: existingAgendamentoId,
+        preferred_date: resolvedRescheduleDate,
+        preferred_time: resolvedRescheduleTime,
+        reschedule_new_date: resolvedRescheduleDate,
+        reschedule_new_time: resolvedRescheduleTime,
         selected_slot: null,
         available_slots: [],
         slots_page: 0,
         slots_generated_for_date: null,
         reschedule_new_slot: null,
       }, updatedContext.context_version);
-      const directive = buildResponseDirective({
-        state: updatedContext.state,
-        mustSayBlocks: [{
-          type: 'ask_date',
-          content: 'Pede a nova data e hora para o reagendamento.',
-          priority: 1,
-        }],
-        confirmedData: buildConfirmedSnapshot(updatedContext),
-        emotionalContext: emotionalContext as any,
-        language: 'pt-PT',
-      });
-      reply = await generateResponse(
-        userMessage,
-        updatedContext,
-        serializeDirectiveToPrompt(directive),
-        null,
-        agentCtx,
-        empresaId,
-      );
+
+      let handledImmediateReschedule = false;
+      if (existingAgendamentoId && (extraction.time_parsed || extraction.date_parsed)) {
+        const orchestration = await orchestrateBooking(
+          {
+            ...updatedContext,
+            current_intent: 'RESCHEDULE' as any,
+          },
+          empresaId,
+          requirePhone,
+          requireReason
+        );
+        updatedContext = await updateContext(conversationId, {
+          ...orchestration.context_updates,
+          current_intent: 'RESCHEDULE',
+        }, updatedContext.context_version);
+
+        if (extraction.time_parsed && updatedContext.available_slots.length > 0) {
+          await processTimeBasedSlotSearch('decision');
+        } else {
+          const slotReply = buildOrchestrationSlotsReply(orchestration.action, orchestration.slots ?? null);
+          reply = slotReply ??
+            'Indique a nova data e hora pretendida para o reagendamento.';
+        }
+        handledImmediateReschedule = true;
+      }
+
+      if (!handledImmediateReschedule) {
+        const directive = buildResponseDirective({
+          state: updatedContext.state,
+          mustSayBlocks: [{
+            type: 'ask_date',
+            content: 'Pede a nova data e hora para o reagendamento.',
+            priority: 1,
+          }],
+          confirmedData: buildConfirmedSnapshot(updatedContext),
+          emotionalContext: emotionalContext as any,
+          language: 'pt-PT',
+        });
+        reply = await generateResponse(
+          userMessage,
+          updatedContext,
+          serializeDirectiveToPrompt(directive),
+          null,
+          agentCtx,
+          empresaId,
+        );
+      }
 
     // --- 9d. BOOKING FLOW (state-driven, ALL branches use updatedContext.state) ---
     } else if (
