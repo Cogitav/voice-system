@@ -9,6 +9,7 @@ interface AvailabilityRequest {
   allow_same_day?: boolean;
   minimum_advance_minutes?: number;
   preferred_time?: string;
+  exclude_booking_id?: string | null;
 }
 
 interface AvailabilityResult {
@@ -137,7 +138,8 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
     .not('estado', 'eq', 'cancelado')
     .not('scheduling_state', 'eq', 'cancelled');
 
-  const bookings: ExistingBooking[] = existingBookings ?? [];
+  const bookings: ExistingBooking[] = (existingBookings ?? [])
+    .filter((booking) => !req.exclude_booking_id || booking.id !== req.exclude_booking_id);
 
   const startMinutes = timeToMinutes(businessHours.start_time);
   const endMinutes = timeToMinutes(businessHours.end_time);
@@ -204,6 +206,7 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
           excluded_estado: 'cancelado',
           excluded_scheduling_state: 'cancelled',
           preferred_time: req.preferred_time ?? null,
+          excluded_booking_id: req.exclude_booking_id ?? null,
         },
         conflicting_rows: overlappingRows.map((booking) => ({
           id: booking.id,
@@ -238,6 +241,7 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
           excluded_estado: 'cancelado',
           excluded_scheduling_state: 'cancelled',
           preferred_time: req.preferred_time ?? null,
+          excluded_booking_id: req.exclude_booking_id ?? null,
         },
         conflicting_rows: blockingConflicts.map((booking) => ({
           id: booking.id,

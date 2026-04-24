@@ -1,9 +1,9 @@
 import { getServiceClient } from './supabase-client.ts';
-import { ConversationContext, BookingResult, SlotSuggestion } from './types.ts';
+import { ConversationContext, BookingResult } from './types.ts';
 import { checkAvailability } from './availability-engine.ts';
 import { guardReschedule } from './guardrails.ts';
 import { consumeCredits } from './credit-manager.ts';
-import { log, logAction } from './logger.ts';
+import { logAction } from './logger.ts';
 
 export async function executeReschedule(
   context: ConversationContext,
@@ -20,7 +20,6 @@ export async function executeReschedule(
   const appointmentId = context.reschedule_from_agendamento_id!;
   const newSlot = context.reschedule_new_slot!;
 
-  // Verify appointment exists and belongs to this empresa
   const { data: existing } = await db
     .from('agendamentos')
     .select('id, service_id, start_datetime, end_datetime, estado, scheduling_state')
@@ -29,28 +28,55 @@ export async function executeReschedule(
     .single();
 
   if (!existing) {
-    return { success: false, agendamento_id: null, error: 'Agendamento não encontrado.', error_code: 'NOT_FOUND' };
+    return { success: false, agendamento_id: null, error: 'Agendamento nao encontrado.', error_code: 'NOT_FOUND' };
   }
 
   if (existing.scheduling_state === 'cancelled') {
-    return { success: false, agendamento_id: null, error: 'Não é possível remarcar um agendamento cancelado.', error_code: 'ALREADY_CANCELLED' };
+    return { success: false, agendamento_id: null, error: 'Nao e possivel remarcar um agendamento cancelado.', error_code: 'ALREADY_CANCELLED' };
   }
 
-  // Race condition check
+  const requestedTime = newSlot.start.match(/T(\d{2}:\d{2})/)?.[1];
   const recheck = await checkAvailability({
     empresa_id: empresaId,
     service_id: context.service_id ?? existing.service_id,
     date: newSlot.start.slice(0, 10),
     timezone: 'Europe/Lisbon',
+    preferred_time: requestedTime,
+    exclude_booking_id: appointmentId,
   });
 
-  const stillAvailable = recheck.slots.some(s => s.start === newSlot.start);
+  const stillAvailable = recheck.slots.some((slot) =>
+    slot.start === newSlot.start &&
+    slot.end === newSlot.end &&
+    ((slot.resource_id ?? null) === (newSlot.resource_id ?? null) || !newSlot.resource_id)
+  );
+
+  console.log('[FLOW_RESCHEDULE_CONFLICT_CHECK]', JSON.stringify({
+    original_agendamento_id: appointmentId,
+    excluded_agendamento_id: appointmentId,
+    new_slot_start: newSlot.start,
+    new_slot_end: newSlot.end,
+    new_slot_resource_id: newSlot.resource_id ?? null,
+    returned_slots: recheck.slots.map((slot) => ({
+      start: slot.start,
+      end: slot.end,
+      resource_id: slot.resource_id ?? null,
+    })),
+    still_available: stillAvailable,
+  }));
+
   if (!stillAvailable) {
-    return { success: false, agendamento_id: null, error: 'Slot já não está disponível.', error_code: 'SLOT_CONFLICT' };
+    console.log('[FLOW_RESCHEDULE_SLOT_CONFLICT]', JSON.stringify({
+      original_agendamento_id: appointmentId,
+      excluded_agendamento_id: appointmentId,
+      new_slot_start: newSlot.start,
+      new_slot_resource_id: newSlot.resource_id ?? null,
+    }));
+    return { success: false, agendamento_id: null, error: 'Slot ja nao esta disponivel.', error_code: 'SLOT_CONFLICT' };
   }
 
   const dataStr = newSlot.start.slice(0, 10);
-  const horaStr = `${newSlot.start.match(/T(\d{2}:\d{2})/)?.[1] ?? '00:00'}:00`;
+  const horaStr = `${requestedTime ?? '00:00'}:00`;
   const previousBookingStatus = {
     estado: existing.estado ?? null,
     scheduling_state: existing.scheduling_state ?? null,
@@ -75,6 +101,22 @@ export async function executeReschedule(
     .eq('empresa_id', empresaId);
 
   if (updateError) {
+    if (updateError.code === '23505') {
+      console.log('[FLOW_RESCHEDULE_SLOT_CONFLICT]', JSON.stringify({
+        original_agendamento_id: appointmentId,
+        excluded_agendamento_id: appointmentId,
+        new_slot_start: newSlot.start,
+        new_slot_resource_id: newSlot.resource_id ?? null,
+        error: {
+          message: updateError.message ?? null,
+          code: updateError.code ?? null,
+          details: updateError.details ?? null,
+          hint: updateError.hint ?? null,
+        },
+      }));
+      return { success: false, agendamento_id: null, error: 'Slot ja nao esta disponivel.', error_code: 'SLOT_CONFLICT' };
+    }
+
     console.log('[FLOW_DEBUG_RESCHEDULE]', JSON.stringify({
       original_agendamento_id: appointmentId,
       new_agendamento_id: null,
@@ -109,6 +151,15 @@ export async function executeReschedule(
     reschedule_success: true,
   }));
 
+  console.log('[FLOW_RESCHEDULE_SUCCESS]', JSON.stringify({
+    original_agendamento_id: appointmentId,
+    new_agendamento_id: appointmentId,
+    old_slot_start: existing.start_datetime ?? null,
+    new_slot_start: newSlot.start,
+    new_slot_resource_id: newSlot.resource_id ?? null,
+    reschedule_success: true,
+  }));
+
   return { success: true, agendamento_id: appointmentId, error: null, error_code: null };
 }
 
@@ -118,8 +169,6 @@ export function resolveRescheduleSlot(
   newTime: string | null
 ): Partial<ConversationContext> {
   const snapshot = context.confirmed_snapshot;
-
-  // Preserve existing date if only time changed
   const resolvedDate = newDate ?? context.reschedule_new_date ?? snapshot?.start?.slice(0, 10) ?? context.preferred_date;
   const resolvedTime = newTime ?? context.reschedule_new_time;
 

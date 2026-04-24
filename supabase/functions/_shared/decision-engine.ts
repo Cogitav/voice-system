@@ -269,29 +269,27 @@ function decideFromActiveBookingState(
   if (
     state === 'collecting_data' &&
     hasService(context) &&
-    !hasDate(context)
+    (missingPersonal.length > 0 || missingReason)
   ) {
     return buildDecision(
-      'ASK_DATE',
+      'ASK_PERSONAL_DATA',
       'collecting_data',
       0.96,
-      'Active date collection state: continue collecting preferred_date before handling other intents'
+      'Active data collection state: collect required personal data before generating slots',
+      { missing_fields: missingReason ? [...missingPersonal, 'customer_reason'] : missingPersonal }
     );
   }
 
   if (
     state === 'collecting_data' &&
     hasService(context) &&
-    hasDate(context) &&
-    (missingPersonal.length > 0 || missingReason)
+    !hasDate(context)
   ) {
     return buildDecision(
-      'ASK_PERSONAL_DATA',
-      // Phase 1: collapse the dedicated personal-data pseudo-state into the supported data-collection state.
+      'ASK_DATE',
       'collecting_data',
       0.96,
-      'Active personal data collection state: continue collecting required booking data',
-      { missing_fields: missingReason ? [...missingPersonal, 'customer_reason'] : missingPersonal }
+      'Active date collection state: required personal data exists, now collect preferred_date'
     );
   }
 
@@ -566,16 +564,6 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
     );
   }
 
-  if (!hasDate(context)) {
-    return buildDecision(
-      'ASK_DATE',
-      // Phase 1: collapse the dedicated date pseudo-state into the supported data-collection state.
-      'collecting_data',
-      0.95,
-      'Missing preferred_date in booking flow'
-    );
-  }
-
   const missingPersonal = missingPersonalFields(context, config.requirePhone);
   if (missingPersonal.length > 0) {
     return buildDecision(
@@ -596,6 +584,16 @@ export function decideNextAction(input: DecisionEngineInput): DecisionEngineOutp
       0.82,
       'Missing required booking reason',
       { missing_fields: ['customer_reason'] }
+    );
+  }
+
+  if (!hasDate(context)) {
+    return buildDecision(
+      'ASK_DATE',
+      // Phase 1: collapse the dedicated date pseudo-state into the supported data-collection state.
+      'collecting_data',
+      0.95,
+      'Required personal data exists; missing preferred_date in booking flow'
     );
   }
 
