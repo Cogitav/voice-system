@@ -25,6 +25,22 @@ export async function loadServices(empresaId: string): Promise<SchedulingService
   return data as SchedulingService[];
 }
 
+export async function loadMenuServices(empresaId: string): Promise<SchedulingService[]> {
+  const db = getServiceClient();
+  const { data, error } = await db
+    .from('scheduling_services')
+    .select('*')
+    .eq('empresa_id', empresaId)
+    .eq('show_in_chat_menu', true)
+    .eq('status', 'active')
+    .eq('bookable', true)
+    .order('priority', { ascending: true })
+    .limit(8);
+
+  if (error || !data) return [];
+  return data as SchedulingService[];
+}
+
 function tryDeterministic(message: string, services: SchedulingService[]): ServiceResolveResult | null {
   const normalize = (text: string) =>
     text.toLowerCase()

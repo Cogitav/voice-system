@@ -10,7 +10,7 @@ import {
 } from '../_shared/extraction-contract.ts';
 import { handleSystemError, resetErrorCount } from '../_shared/error-handler.ts';
 import { EMOTION_KEYWORDS, ERROR_MESSAGES, HANDOFF_RULES } from '../_shared/constants.ts';
-import { resolveService, loadServices } from '../_shared/service-resolver.ts';
+import { resolveService, loadServices, loadMenuServices } from '../_shared/service-resolver.ts';
 import { findClosestSlot, orchestrateBooking, resolveSlotSelectionFromContext } from '../_shared/booking-orchestrator.ts';
 import { executeBooking } from '../_shared/booking-executor.ts';
 import { executeReschedule } from '../_shared/reschedule-handler.ts';
@@ -29,6 +29,7 @@ import { log } from '../_shared/logger.ts';
 import { ConversationContext, ConversationState, LLMExtraction, SchedulingService, SlotSuggestion } from '../_shared/types.ts';
 import { decideNextAction } from '../_shared/decision-engine.ts';
 import type { ActionType } from '../_shared/action-types.ts';
+import { parseDateTime } from '../_shared/date-parser.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -409,6 +410,128 @@ function normalizeSignalText(value: string): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+function editDistance(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+
+  return dp[a.length][b.length];
+}
+
+function formatTimeForClarification(time: string | null): string | null {
+  if (!time) return null;
+  const [hour, minute] = time.split(':');
+  if (!hour || minute === undefined) return time;
+  return minute === '00' ? `${Number(hour)}h` : `${Number(hour)}h${minute}`;
+}
+
+function normalizeFuzzyPtDate(
+  userMessage: string,
+  referenceDate: Date,
+  timezone: string
+): {
+  changed: boolean;
+  confidence: 'high' | 'uncertain' | null;
+  matched_token: string | null;
+  normalized_token: 'hoje' | 'amanha' | null;
+  normalized_text: string;
+  date_parsed: string | null;
+  time_parsed: string | null;
+  clarification: string | null;
+} {
+  const highConfidenceMap: Record<string, 'hoje' | 'amanha'> = {
+    hoje: 'hoje',
+    joje: 'hoje',
+    jhoje: 'hoje',
+    jhojas: 'hoje',
+    hije: 'hoje',
+    amanha: 'amanha',
+    amanhã: 'amanha',
+    amanah: 'amanha',
+  };
+
+  let matchedToken: string | null = null;
+  let normalizedToken: 'hoje' | 'amanha' | null = null;
+  let confidence: 'high' | 'uncertain' | null = null;
+
+  for (const match of userMessage.matchAll(/\b[\p{L}]+\b/gu)) {
+    const token = match[0];
+    const normalized = normalizeSignalText(token).replace(/[^\p{L}]/gu, '');
+
+    if (highConfidenceMap[normalized]) {
+      matchedToken = token;
+      normalizedToken = highConfidenceMap[normalized];
+      confidence = 'high';
+      break;
+    }
+
+    const todayDistance = editDistance(normalized, 'hoje');
+    const tomorrowDistance = editDistance(normalized, 'amanha');
+    if (normalized.length >= 4 && (todayDistance === 1 || tomorrowDistance === 1)) {
+      matchedToken = token;
+      normalizedToken = todayDistance <= tomorrowDistance ? 'hoje' : 'amanha';
+      confidence = 'uncertain';
+      break;
+    }
+  }
+
+  if (!matchedToken || !normalizedToken || !confidence) {
+    return {
+      changed: false,
+      confidence: null,
+      matched_token: null,
+      normalized_token: null,
+      normalized_text: userMessage,
+      date_parsed: null,
+      time_parsed: null,
+      clarification: null,
+    };
+  }
+
+  const normalizedText = userMessage.replace(new RegExp(`\\b${matchedToken}\\b`, 'iu'), normalizedToken);
+  const parsed = parseDateTime(normalizedText, referenceDate, timezone);
+  const clarificationTime = formatTimeForClarification(parsed.time);
+  const clarification = confidence === 'uncertain' && parsed.time
+    ? `Quer dizer ${normalizedToken} às ${clarificationTime}?`
+    : null;
+
+  return {
+    changed: normalizedText !== userMessage,
+    confidence,
+    matched_token: matchedToken,
+    normalized_token: normalizedToken,
+    normalized_text: normalizedText,
+    date_parsed: parsed.date,
+    time_parsed: parsed.time,
+    clarification,
+  };
+}
+
+function hasBookingContinuationSignal(userMessage: string, extraction: LLMExtraction): boolean {
+  const normalized = normalizeSignalText(userMessage);
+  return (
+    /\b(marcar|agendar|reservar|consulta|consultar|agendamento|horario|hora|dor|sintoma|problema|motivo)\b/.test(normalized) ||
+    hasSoftServiceSignal(extraction)
+  );
+}
+
+function isServiceMenuSelectionState(context: ConversationContext): boolean {
+  return (
+    context.state === 'idle' ||
+    context.state === 'collecting_service'
+  ) && context.available_slots.length === 0;
+}
+
 function inferTimeRelation(
   userMessage: string,
   extraction: LLMExtraction
@@ -683,6 +806,33 @@ serve(async (req) => {
       extraction = parseExtractionResponse('');
     }
     extraction = normalizeExtraction(extraction);
+    const dateNormalization = normalizeFuzzyPtDate(userMessage, new Date(), timezone);
+    let dateNormalizerClarification: string | null = null;
+    if (dateNormalization.confidence) {
+      logFlow('[FLOW_DATE_NORMALIZER]', {
+        conversation_id: conversationId,
+        raw_user_text: userMessage,
+        matched_token: dateNormalization.matched_token,
+        normalized_token: dateNormalization.normalized_token,
+        confidence: dateNormalization.confidence,
+        date_parsed: dateNormalization.date_parsed,
+        time_parsed: dateNormalization.time_parsed,
+      });
+
+      if (dateNormalization.confidence === 'high') {
+        extraction = {
+          ...extraction,
+          date_raw: extraction.date_raw ?? dateNormalization.matched_token,
+          time_raw: extraction.time_raw ?? dateNormalization.time_parsed,
+          date_parsed: extraction.date_parsed ?? dateNormalization.date_parsed,
+          time_parsed: extraction.time_parsed ?? dateNormalization.time_parsed,
+          intent: extraction.intent === 'INFO_REQUEST' ? 'BOOKING_NEW' : extraction.intent,
+          confidence: Math.max(extraction.confidence ?? 0, 0.85),
+        };
+      } else if (dateNormalization.clarification) {
+        dateNormalizerClarification = dateNormalization.clarification;
+      }
+    }
     const inferredTimeRelation = inferTimeRelation(userMessage, extraction);
     extraction = {
       ...extraction,
@@ -690,6 +840,16 @@ serve(async (req) => {
       relative_time_direction: inferredTimeRelation.relative_time_direction,
     };
     const originalIntent = extraction.intent;
+    if (
+      ACTIVE_BOOKING_STATES.has(context.state) &&
+      extraction.intent === 'INFO_REQUEST' &&
+      hasBookingContinuationSignal(userMessage, extraction)
+    ) {
+      extraction = {
+        ...extraction,
+        intent: 'BOOKING_NEW',
+      };
+    }
     if (
       (extraction.time_parsed || extraction.relative_time_direction) &&
       (
@@ -733,7 +893,7 @@ serve(async (req) => {
       emotionalContext = { ...extraction.emotional_context, detected_by: 'llm' };
     }
 
-    const intent = extraction.intent;
+    let intent = extraction.intent;
     const keepCurrentDateOnTimeOnlyChange = shouldKeepCurrentDateOnTimeOnlyChange(context, extraction, userMessage);
 
     // -------------------------------------------------------------------------
@@ -829,29 +989,98 @@ serve(async (req) => {
       });
     }
 
-    const explicitServiceChange = isExplicitServiceChangeRequest(extraction, userMessage);
-    if (updatedContext.service_locked && explicitServiceChange) {
-      const previousServiceId = updatedContext.service_id ?? null;
-      updatedContext = await updateContext(conversationId, {
-        service_id: null,
-        service_name: null,
-        service_source: null,
-        service_locked: false,
-        selected_slot: null,
-        available_slots: [],
-        slots_page: 0,
-        slots_generated_for_date: null,
-        state: 'collecting_service',
-      }, updatedContext.context_version);
+    let servicesCache: SchedulingService[] | null = null;
+    let menuServicesCache: SchedulingService[] | null = null;
+    const getServices = async () => {
+      servicesCache ??= await loadServices(empresaId);
+      return servicesCache;
+    };
+    const getMenuServices = async () => {
+      menuServicesCache ??= await loadMenuServices(empresaId);
+      return menuServicesCache;
+    };
 
-      logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
-        previous_service_id: previousServiceId,
-        new_service_id: null,
-        service_locked: false,
-        source: 'explicit_service_change',
-        overwrite_prevented: false,
-      });
-    } else if (
+    const explicitServiceChange = isExplicitServiceChangeRequest(extraction, userMessage);
+    let serviceChangedThisTurn = false;
+    const shouldCheckServiceChange =
+      ACTIVE_BOOKING_STATES.has(updatedContext.state) &&
+      (!!updatedContext.service_id || updatedContext.service_locked) &&
+      intent !== 'HUMAN_REQUEST' &&
+      (explicitServiceChange || hasBookingContinuationSignal(userMessage, extraction));
+
+    if (shouldCheckServiceChange) {
+      const services = await getServices();
+      const combinedInput = [
+        userMessage,
+        Array.isArray(extraction.service_keywords) ? extraction.service_keywords.join(' ') : '',
+      ].filter(Boolean).join(' ').trim();
+      const serviceResult = await resolveService(combinedInput, empresaId, services);
+      const isDifferentService =
+        !!serviceResult.service_id &&
+        serviceResult.service_id !== updatedContext.service_id;
+
+      if (isDifferentService) {
+        const oldServiceId = updatedContext.service_id ?? null;
+        const oldServiceName = updatedContext.service_name ?? null;
+        updatedContext = await updateContext(conversationId, {
+          service_id: serviceResult.service_id,
+          service_name: serviceResult.service_name,
+          service_source: 'explicit_service_change',
+          service_locked: true,
+          selected_slot: null,
+          available_slots: [],
+          slots_page: 0,
+          slots_generated_for_date: null,
+          state: 'collecting_data',
+        }, updatedContext.context_version);
+
+        extraction = {
+          ...extraction,
+          service_id: serviceResult.service_id,
+          service_keywords: serviceResult.service_name ? [serviceResult.service_name] : extraction.service_keywords,
+          intent: 'BOOKING_NEW',
+        };
+        intent = extraction.intent;
+        serviceChangedThisTurn = true;
+
+        logFlow('[FLOW_SERVICE_CHANGE]', {
+          conversation_id: conversationId,
+          old_service_name: oldServiceName,
+          new_service_name: serviceResult.service_name,
+        });
+        logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
+          previous_service_id: oldServiceId,
+          new_service_id: serviceResult.service_id,
+          service_locked: true,
+          source: 'explicit_service_change',
+          overwrite_prevented: false,
+        });
+      } else if (updatedContext.service_locked && explicitServiceChange && !serviceResult.service_id) {
+        const previousServiceId = updatedContext.service_id ?? null;
+        updatedContext = await updateContext(conversationId, {
+          service_id: null,
+          service_name: null,
+          service_source: null,
+          service_locked: false,
+          selected_slot: null,
+          available_slots: [],
+          slots_page: 0,
+          slots_generated_for_date: null,
+          state: 'collecting_service',
+        }, updatedContext.context_version);
+
+        logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
+          previous_service_id: previousServiceId,
+          new_service_id: null,
+          service_locked: false,
+          source: 'explicit_service_change',
+          overwrite_prevented: false,
+        });
+      }
+    }
+
+    if (
+      !serviceChangedThisTurn &&
       isServiceLockedForState(updatedContext) &&
       (hasSoftServiceSignal(extraction) || extraction.service_id)
     ) {
@@ -902,7 +1131,82 @@ serve(async (req) => {
     // 7. Resolve service deterministically — combine message + reason + keywords
     //    BUG FIX #2: resolveService now receives combined input, not just userMessage
     // -------------------------------------------------------------------------
+    const numericMenuIndex = parseNumericMenuSelection(userMessage);
     if (
+      numericMenuIndex !== null &&
+      isServiceMenuSelectionState(updatedContext) &&
+      intent !== 'HUMAN_REQUEST'
+    ) {
+      const menuServices = await getMenuServices();
+      const numericService = resolveNumericServiceSelection(userMessage, menuServices);
+      const displayedServicesOrder = menuServices.map((service, index) => ({
+        menu_index: index + 1,
+        service_id: service.id,
+        service_name: service.name,
+      }));
+
+      logFlow('[FLOW_SERVICE_MENU_SELECTION]', {
+        conversation_id: conversationId,
+        menu_index: numericMenuIndex,
+        selected_service_id: numericService?.id ?? null,
+        selected_service_name: numericService?.name ?? null,
+        displayed_services_order: displayedServicesOrder,
+      });
+
+      if (numericService) {
+        const previousServiceId = updatedContext.service_id ?? null;
+        updatedContext = await updateContext(conversationId, {
+          service_id: numericService.id,
+          service_name: numericService.name,
+          service_source: 'menu_numeric_selection',
+          service_locked: true,
+          selected_slot: null,
+          available_slots: [],
+          slots_page: 0,
+          slots_generated_for_date: null,
+        }, updatedContext.context_version);
+
+        extraction = {
+          ...extraction,
+          service_id: numericService.id,
+          service_keywords: [numericService.name],
+          intent: 'BOOKING_NEW',
+        };
+        intent = extraction.intent;
+
+        logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
+          previous_service_id: previousServiceId,
+          new_service_id: numericService.id,
+          service_locked: true,
+          source: 'menu_numeric_selection',
+          overwrite_prevented: false,
+        });
+
+        decision = decideNextAction({
+          context: updatedContext,
+          extraction,
+          userMessage,
+          config: {
+            requirePhone,
+            requireReason,
+            allowSameDayBooking: bookingConfig?.allow_same_day_booking,
+            minimumAdvanceMinutes: bookingConfig?.minimum_advance_minutes,
+          },
+        });
+
+        logFlow('[FLOW_DECISION]', {
+          stage: 'post_service_menu_selection',
+          conversation_id: conversationId,
+          action: decision.action,
+          proposed_state: decision.proposed_state,
+          confidence: decision.confidence,
+          reason: decision.reason,
+        });
+      }
+    }
+
+    if (
+      numericMenuIndex === null &&
       !updatedContext.service_id &&
       !isServiceLockedForState(updatedContext) &&
       intent !== 'HUMAN_REQUEST' &&
@@ -912,7 +1216,7 @@ serve(async (req) => {
         hasSoftServiceSignal(extraction)
       )
     ) {
-      const services = await loadServices(empresaId);
+      const services = await getServices();
       const numericService = updatedContext.state === 'collecting_service'
         ? resolveNumericServiceSelection(userMessage, services)
         : null;
@@ -1043,6 +1347,15 @@ serve(async (req) => {
     if (errorState && errorState.consecutive_errors >= HANDOFF_RULES.system_error_threshold) {
       await triggerHandoff(conversationId, empresaId, updatedContext, 'Auto handoff: system errors threshold');
       const reply = 'Peço desculpa pelas dificuldades. Vou transferir para um operador humano que pode ajudar melhor.';
+      await db.from('messages').insert({ conversation_id: conversationId, sender_type: 'ai', content: reply });
+      await consumeCredits(empresaId, 'message', conversationId);
+      return new Response(JSON.stringify({ reply }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (dateNormalizerClarification) {
+      const reply = dateNormalizerClarification;
       await db.from('messages').insert({ conversation_id: conversationId, sender_type: 'ai', content: reply });
       await consumeCredits(empresaId, 'message', conversationId);
       return new Response(JSON.stringify({ reply }), {
@@ -1559,30 +1872,37 @@ serve(async (req) => {
           state: 'collecting_data',
         }, updatedContext.context_version);
 
-        const askDateContent = updatedContext.service_name
+        const shouldUseDeterministicDatePrompt =
+          !!updatedContext.service_name && hasBookingContinuationSignal(userMessage, extraction);
+
+        if (shouldUseDeterministicDatePrompt) {
+          reply = `Claro. Para avancar com ${updatedContext.service_name}, indique a data e hora que prefere. Se quiser, pode escrever algo como 'hoje as 12h30'.`;
+        } else {
+          const askDateContent = updatedContext.service_name
           ? `Pergunta de forma clara para que data prefere o agendamento de ${updatedContext.service_name}.`
           : 'Pergunta de forma clara para que data prefere o agendamento.';
 
-        const directive = buildResponseDirective({
-          state: updatedContext.state,
-          mustSayBlocks: [{
-            type: 'ask_date',
-            content: askDateContent,
-            priority: 1,
-          }],
-          confirmedData: buildConfirmedSnapshot(updatedContext),
-          emotionalContext: emotionalContext as any,
-          language: 'pt-PT',
-        });
+          const directive = buildResponseDirective({
+            state: updatedContext.state,
+            mustSayBlocks: [{
+              type: 'ask_date',
+              content: askDateContent,
+              priority: 1,
+            }],
+            confirmedData: buildConfirmedSnapshot(updatedContext),
+            emotionalContext: emotionalContext as any,
+            language: 'pt-PT',
+          });
 
-        reply = await generateResponse(
-          userMessage,
-          updatedContext,
-          serializeDirectiveToPrompt(directive),
-          null,
-          agentCtx,
-          empresaId,
-        );
+          reply = await generateResponse(
+            userMessage,
+            updatedContext,
+            serializeDirectiveToPrompt(directive),
+            null,
+            agentCtx,
+            empresaId,
+          );
+        }
 
       } else if (decision.action === 'ASK_PERSONAL_DATA') {
         logFlow('[FLOW_BRANCH]', {
