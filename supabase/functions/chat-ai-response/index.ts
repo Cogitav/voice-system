@@ -1685,13 +1685,38 @@ serve(async (req) => {
           'slot_conflict',
           true,
         );
+        const recoveryContext = {
+          ...updatedContext,
+          selected_slot: null,
+          reschedule_new_slot: null,
+          available_slots: [],
+          slots_generated_for_date: null,
+        };
+        const recoveryOrchestration = await orchestrateBooking(
+          recoveryContext,
+          empresaId,
+          requirePhone,
+          requireReason
+        );
+        const recoverySlots =
+          recoveryOrchestration.slots ??
+          recoveryOrchestration.context_updates.available_slots ??
+          [];
         updatedContext = await updateContext(conversationId, {
+          ...recoveryOrchestration.context_updates,
           state: 'awaiting_slot_selection',
           selected_slot: null,
-          available_slots: [],
+          reschedule_new_slot: null,
+          available_slots: recoverySlots,
           error_context: updatedErrorState,
         }, updatedContext.context_version);
-        reply = ERROR_MESSAGES.system.slot_conflict;
+        reply = recoverySlots.length > 0
+          ? buildSlotsPresentationReply(
+            recoverySlots,
+            ERROR_MESSAGES.system.slot_conflict,
+            'Indique o numero do horario que prefere.'
+          )
+          : ERROR_MESSAGES.system.slot_conflict;
         return;
       }
 

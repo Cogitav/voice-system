@@ -32,9 +32,9 @@ interface Resource {
 
 interface ExistingBooking {
   id: string;
-  start_datetime: string;
-  end_datetime: string;
-  resource_id: string;
+  start_datetime: string | null;
+  end_datetime: string | null;
+  resource_id: string | null;
   estado?: string | null;
   scheduling_state?: string | null;
 }
@@ -42,6 +42,16 @@ interface ExistingBooking {
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return h * 60 + m;
+}
+
+function bookingOverlapsSlot(booking: ExistingBooking, slotStartISO: string, slotEndISO: string): boolean {
+  if (!booking.start_datetime || !booking.end_datetime) return false;
+  const bookingStart = new Date(booking.start_datetime).getTime();
+  const bookingEnd = new Date(booking.end_datetime).getTime();
+  const candidateStart = new Date(slotStartISO).getTime();
+  const candidateEnd = new Date(slotEndISO).getTime();
+  if ([bookingStart, bookingEnd, candidateStart, candidateEnd].some(Number.isNaN)) return false;
+  return candidateStart < bookingEnd && candidateEnd > bookingStart;
 }
 
 function slotStartToMinutes(slot: SlotSuggestion): number {
@@ -157,48 +167,34 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
 
     const slotStartISO = `${req.date}T${minutesToTime(slotStart)}:00.000Z`;
     const slotEndISO = `${req.date}T${minutesToTime(slotEnd)}:00.000Z`;
-    const overlappingRows = bookings.filter((booking) => {
-      const bookingStart = new Date(booking.start_datetime).getTime();
-      const bookingEnd = new Date(booking.end_datetime).getTime();
-      const candidateStart = new Date(slotStartISO).getTime();
-      const candidateEnd = new Date(slotEndISO).getTime();
-      return candidateStart < bookingEnd && candidateEnd > bookingStart;
-    });
-
-    let isAvailable = true;
+    const overlappingRows = bookings.filter((booking) => bookingOverlapsSlot(booking, slotStartISO, slotEndISO));
+    let selectedResource: Resource | null = null;
+    let blockingConflicts: ExistingBooking[] = [];
+    let isAvailable = false;
 
     if (resources.length > 0) {
       for (const resource of resources) {
-        const conflicts = bookings.filter(b => {
-          if (b.resource_id !== resource.id) return false;
-          const bStart = new Date(b.start_datetime).getTime();
-          const bEnd = new Date(b.end_datetime).getTime();
-          const sStart = new Date(slotStartISO).getTime();
-          const sEnd = new Date(slotEndISO).getTime();
-          return sStart < bEnd && sEnd > bStart;
-        });
-        if (conflicts.length >= resource.capacity) {
-          isAvailable = false;
+        const conflicts = overlappingRows.filter((booking) => booking.resource_id === resource.id);
+        if (conflicts.length === 0) {
+          selectedResource = resource;
+          isAvailable = true;
           break;
         }
+        blockingConflicts = conflicts;
       }
     } else {
-      const conflicts = bookings.filter(b => {
-        const bStart = new Date(b.start_datetime).getTime();
-        const bEnd = new Date(b.end_datetime).getTime();
-        const sStart = new Date(slotStartISO).getTime();
-        const sEnd = new Date(slotEndISO).getTime();
-        return sStart < bEnd && sEnd > bStart;
-      });
-      if (conflicts.length > 0) isAvailable = false;
+      blockingConflicts = overlappingRows.filter((booking) => booking.resource_id === null);
+      isAvailable = blockingConflicts.length === 0;
     }
 
     if (isAvailable) {
-      console.log('[FLOW_DEBUG_AVAILABILITY_SOURCE]', JSON.stringify({
+      console.log('[FLOW_DEBUG_RESOURCE_SCOPED_AVAILABILITY]', JSON.stringify({
         start: slotStartISO,
         end: slotEndISO,
-        resource_id: resources[0]?.id ?? '',
+        resource_id: selectedResource?.id ?? '',
         timezone: req.timezone,
+        availability_decision: 'included',
+        conflict_scope: selectedResource ? 'resource_id' : 'unscoped',
         query_filters: {
           empresa_id: req.empresa_id,
           service_id: req.service_id,
@@ -222,9 +218,36 @@ export async function checkAvailability(req: AvailabilityRequest): Promise<Avail
       slots.push({
         start: slotStartISO,
         end: slotEndISO,
-        resource_id: resources[0]?.id ?? '',
+        resource_id: selectedResource?.id ?? '',
         display_label: formatDisplayLabel(req.date, minutesToTime(slotStart), minutesToTime(slotEnd)),
       });
+    } else if (blockingConflicts.length > 0) {
+      console.log('[FLOW_DEBUG_RESOURCE_SCOPED_AVAILABILITY]', JSON.stringify({
+        start: slotStartISO,
+        end: slotEndISO,
+        resource_id: resources.map((resource) => resource.id),
+        timezone: req.timezone,
+        availability_decision: 'excluded',
+        conflict_scope: resources.length > 0 ? 'resource_id' : 'unscoped',
+        query_filters: {
+          empresa_id: req.empresa_id,
+          service_id: req.service_id,
+          date: req.date,
+          start_gte: req.date + 'T00:00:00Z',
+          start_lt: req.date + 'T23:59:59Z',
+          excluded_estado: 'cancelado',
+          excluded_scheduling_state: 'cancelled',
+          preferred_time: req.preferred_time ?? null,
+        },
+        conflicting_rows: blockingConflicts.map((booking) => ({
+          id: booking.id,
+          start: booking.start_datetime,
+          end: booking.end_datetime,
+          resource_id: booking.resource_id,
+          estado: booking.estado ?? null,
+          scheduling_state: booking.scheduling_state ?? null,
+        })),
+      }));
     }
 
     cursor += 30;

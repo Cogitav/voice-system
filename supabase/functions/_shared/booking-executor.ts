@@ -6,6 +6,13 @@ import { log, logAction } from './logger.ts';
 import { guardBookingExecution } from './guardrails.ts';
 import { randomUUID } from 'https://deno.land/std@0.177.0/node/crypto.ts';
 
+type BookingInsertError = {
+  message?: string | null;
+  code?: string | null;
+  details?: string | null;
+  hint?: string | null;
+};
+
 function redactBookingInsertPayload(payload: Record<string, unknown>): Record<string, unknown> {
   return {
     ...payload,
@@ -13,6 +20,51 @@ function redactBookingInsertPayload(payload: Record<string, unknown>): Record<st
     cliente_telefone: payload.cliente_telefone ? '[REDACTED]' : null,
     notas: payload.notas ? '[REDACTED]' : null,
   };
+}
+
+function serializeBookingError(error: BookingInsertError | null): BookingInsertError {
+  return {
+    message: error?.message ?? null,
+    code: error?.code ?? null,
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+  };
+}
+
+function normalizeUnknownError(error: unknown): BookingInsertError {
+  if (error instanceof Error) return { message: error.message };
+  return { message: String(error) };
+}
+
+function isSlotUniquenessError(error: BookingInsertError | null): boolean {
+  const text = [
+    error?.message,
+    error?.code,
+    error?.details,
+    error?.hint,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return (
+    error?.code === '23505' &&
+    (
+      text.includes('idx_agendamentos_resource_start_unique') ||
+      text.includes('start_datetime')
+    )
+  );
+}
+
+function bookingOverlapsSlot(
+  booking: { start_datetime: string | null; end_datetime: string | null },
+  slotStartISO: string,
+  slotEndISO: string,
+): boolean {
+  if (!booking.start_datetime || !booking.end_datetime) return false;
+  const bookingStart = new Date(booking.start_datetime).getTime();
+  const bookingEnd = new Date(booking.end_datetime).getTime();
+  const slotStart = new Date(slotStartISO).getTime();
+  const slotEnd = new Date(slotEndISO).getTime();
+  if ([bookingStart, bookingEnd, slotStart, slotEnd].some(Number.isNaN)) return false;
+  return slotStart < bookingEnd && slotEnd > bookingStart;
 }
 
 export async function executeBooking(
@@ -52,7 +104,7 @@ export async function executeBooking(
     preferred_time: slotTime ?? null,
   };
 
-  const { data: conflictRows } = await db
+  let conflictQuery = db
     .from('agendamentos')
     .select('id, start_datetime, end_datetime, resource_id, estado, scheduling_state')
     .eq('empresa_id', empresaId)
@@ -61,13 +113,15 @@ export async function executeBooking(
     .not('estado', 'eq', bookingQueryFilters.excluded_estado)
     .not('scheduling_state', 'eq', bookingQueryFilters.excluded_scheduling_state);
 
-  const overlappingConflictRows = (conflictRows ?? []).filter((booking) => {
-    const bookingStart = new Date(booking.start_datetime).getTime();
-    const bookingEnd = new Date(booking.end_datetime).getTime();
-    const slotStart = new Date(slot.start).getTime();
-    const slotEnd = new Date(slot.end).getTime();
-    return slotStart < bookingEnd && slotEnd > bookingStart;
-  });
+  conflictQuery = slot.resource_id
+    ? conflictQuery.eq('resource_id', slot.resource_id)
+    : conflictQuery.is('resource_id', null);
+
+  const { data: conflictRows } = await conflictQuery;
+
+  const overlappingConflictRows = (conflictRows ?? []).filter((booking) =>
+    bookingOverlapsSlot(booking, slot.start, slot.end)
+  );
 
   console.log('[FLOW_DEBUG_BOOKING_CONFLICT_CHECK]', JSON.stringify({
     stage: 'before_recheck',
@@ -76,6 +130,8 @@ export async function executeBooking(
     resource_id: slot.resource_id ?? null,
     timezone: 'Europe/Lisbon',
     query_filters: bookingQueryFilters,
+    conflict_scope: 'resource_id',
+    blocks_booking: overlappingConflictRows.length > 0,
     conflicting_rows: overlappingConflictRows.map((booking) => ({
       id: booking.id,
       start: booking.start_datetime,
@@ -87,6 +143,35 @@ export async function executeBooking(
   }));
 
   // Race condition guard — double check availability using the same slot-time normalization
+  if (overlappingConflictRows.length > 0) {
+    const conflictPayload = {
+      start: slot.start,
+      end: slot.end,
+      resource_id: slot.resource_id ?? null,
+      service_id: context.service_id,
+      conflict_scope: 'resource_id',
+      conflicting_rows: overlappingConflictRows.map((booking) => ({
+        id: booking.id,
+        start: booking.start_datetime,
+        end: booking.end_datetime,
+        resource_id: booking.resource_id,
+        estado: booking.estado ?? null,
+        scheduling_state: booking.scheduling_state ?? null,
+      })),
+    };
+
+    console.log('[BOOKING_CONFLICT_RESOURCE_SCOPED]', JSON.stringify(conflictPayload));
+
+    await log({
+      empresa_id: empresaId,
+      conversation_id: conversationId,
+      event_type: 'BOOKING_CONFLICT_RESOURCE_SCOPED',
+      message: 'Slot blocked by existing booking on the same resource',
+      payload: conflictPayload,
+    });
+    return { success: false, agendamento_id: null, error: 'Slot ja nao esta disponivel.', error_code: 'SLOT_CONFLICT' };
+  }
+
   const recheck = await checkAvailability({
     empresa_id: empresaId,
     service_id: context.service_id!,
@@ -95,7 +180,11 @@ export async function executeBooking(
     preferred_time: slotTime,
   });
 
-  const stillAvailable = recheck.slots.some(s => s.start === slot.start && s.end === slot.end);
+  const stillAvailable = recheck.slots.some((s) =>
+    s.start === slot.start &&
+    s.end === slot.end &&
+    ((s.resource_id ?? null) === (slot.resource_id ?? null) || !slot.resource_id)
+  );
   console.log('[FLOW_DEBUG_BOOKING_CONFLICT_CHECK]', JSON.stringify({
     stage: 'after_recheck',
     start: slot.start,
@@ -103,6 +192,8 @@ export async function executeBooking(
     resource_id: slot.resource_id ?? null,
     timezone: 'Europe/Lisbon',
     query_filters: bookingQueryFilters,
+    conflict_scope: 'resource_id',
+    blocks_booking: overlappingConflictRows.length > 0,
     conflicting_rows: overlappingConflictRows.map((booking) => ({
       id: booking.id,
       start: booking.start_datetime,
@@ -196,29 +287,43 @@ export async function executeBooking(
     credits_consumed: 5,
   };
 
-  const { data: booking, error: bookingError } = await db
-    .from('agendamentos')
-    .insert(insertPayload)
-    .select('id')
-    .single();
+  let booking: { id: string } | null = null;
+  let bookingError: BookingInsertError | null = null;
+
+  try {
+    const insertResult = await db
+      .from('agendamentos')
+      .insert(insertPayload)
+      .select('id')
+      .single();
+
+    booking = insertResult.data as { id: string } | null;
+    bookingError = insertResult.error;
+  } catch (error) {
+    bookingError = normalizeUnknownError(error);
+  }
 
   if (bookingError || !booking) {
+    const failurePayload = {
+      execution_id: executionId,
+      booking_error: serializeBookingError(bookingError),
+      insert_payload: redactBookingInsertPayload(insertPayload),
+    };
+
+    console.error('[BOOKING_INSERT_FAILED]', JSON.stringify(failurePayload));
+
     await log({
       empresa_id: empresaId,
       conversation_id: conversationId,
       event_type: 'BOOKING_INSERT_FAILED',
       message: bookingError?.message ?? 'Unknown error',
-      payload: {
-        execution_id: executionId,
-        booking_error: {
-          message: bookingError?.message ?? null,
-          code: bookingError?.code ?? null,
-          details: bookingError?.details ?? null,
-          hint: bookingError?.hint ?? null,
-        },
-        insert_payload: redactBookingInsertPayload(insertPayload),
-      },
+      payload: failurePayload,
     }, 'error');
+
+    if (isSlotUniquenessError(bookingError)) {
+      return { success: false, agendamento_id: null, error: 'Slot ja nao esta disponivel.', error_code: 'SLOT_CONFLICT' };
+    }
+
     return { success: false, agendamento_id: null, error: 'Erro ao criar agendamento.', error_code: 'DB_ERROR' };
   }
 
