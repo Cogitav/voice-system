@@ -31,7 +31,6 @@
 
   const empresaSlug = scriptTag.getAttribute('data-empresa');
   const position = scriptTag.getAttribute('data-position') || 'right'; // 'left' or 'right'
-  const primaryColor = scriptTag.getAttribute('data-color') || '#6366f1';
   const buttonSize = scriptTag.getAttribute('data-size') || '60';
 
   if (!empresaSlug) {
@@ -43,9 +42,91 @@
   const scriptSrc = scriptTag.src;
   const baseUrl = scriptSrc.substring(0, scriptSrc.lastIndexOf('/'));
   const chatUrl = `${baseUrl.replace('/chat-widget.js', '')}/chat/${empresaSlug}?embed=true`;
+  const scriptOrigin = new URL(scriptSrc, window.location.href).origin;
+  const publicChatUrl = scriptTag.getAttribute('data-api-url') || `${scriptOrigin}/functions/v1/public-chat`;
+
+  const defaultBranding = {
+    widget_button_color: scriptTag.getAttribute('data-color') || '#6366f1',
+    widget_size: 'medium',
+    widget_border_radius: 'rounded',
+  };
+
+  let activeBranding = { ...defaultBranding };
+  let styleSheet = null;
+
+  function getWidgetDimensions(size) {
+    switch (size) {
+      case 'small':
+        return { width: '350px', height: '450px' };
+      case 'large':
+        return { width: '420px', height: '600px' };
+      default:
+        return { width: '380px', height: '520px' };
+    }
+  }
+
+  function getBorderRadius(setting) {
+    switch (setting) {
+      case 'normal':
+        return '8px';
+      case 'soft':
+        return '24px';
+      default:
+        return '16px';
+    }
+  }
+
+  function applyBrandingStyles() {
+    if (styleSheet) {
+      styleSheet.textContent = buildStyles();
+    }
+  }
+
+  async function fetchBranding() {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = window.setTimeout(function() {
+      if (controller) controller.abort();
+    }, 3000);
+
+    try {
+      const response = await fetch(publicChatUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'get-empresa',
+          empresaSlug,
+        }),
+        signal: controller ? controller.signal : undefined,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Branding request failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      activeBranding = {
+        ...defaultBranding,
+        ...(result.branding || {}),
+      };
+      applyBrandingStyles();
+    } catch (error) {
+      activeBranding = { ...defaultBranding };
+      applyBrandingStyles();
+      console.warn('[Lovable Chat] Failed to load branding, using defaults:', error);
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  }
 
   // Styles
-  const styles = `
+  function buildStyles() {
+    const dimensions = getWidgetDimensions(activeBranding.widget_size);
+    const borderRadius = getBorderRadius(activeBranding.widget_border_radius);
+    const launcherColor = activeBranding.widget_button_color || defaultBranding.widget_button_color;
+
+    return `
     #${WIDGET_ID} {
       position: fixed;
       bottom: 20px;
@@ -58,7 +139,7 @@
       width: ${buttonSize}px;
       height: ${buttonSize}px;
       border-radius: 50%;
-      background: ${primaryColor};
+      background: ${launcherColor};
       border: none;
       cursor: pointer;
       display: flex;
@@ -103,11 +184,11 @@
       position: fixed;
       bottom: 90px;
       ${position === 'left' ? 'left: 20px;' : 'right: 20px;'}
-      width: 380px;
-      height: 600px;
+      width: ${dimensions.width};
+      height: ${dimensions.height};
       max-height: calc(100vh - 120px);
       max-width: calc(100vw - 40px);
-      border-radius: 16px;
+      border-radius: ${borderRadius};
       overflow: hidden;
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
       opacity: 0;
@@ -170,6 +251,7 @@
       display: flex;
     }
   `;
+  }
 
   // Chat icon SVG
   const chatIconSvg = `
@@ -188,8 +270,8 @@
   // Create widget elements
   function createWidget() {
     // Add styles
-    const styleSheet = document.createElement('style');
-    styleSheet.textContent = styles;
+    styleSheet = document.createElement('style');
+    styleSheet.textContent = buildStyles();
     document.head.appendChild(styleSheet);
 
     // Create container
@@ -292,9 +374,14 @@
   }
 
   // Initialize when DOM is ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', createWidget);
-  } else {
+  function initWidget() {
     createWidget();
+    fetchBranding();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initWidget);
+  } else {
+    initWidget();
   }
 })();
