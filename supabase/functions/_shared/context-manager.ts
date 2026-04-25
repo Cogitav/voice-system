@@ -83,12 +83,20 @@ export async function updateContext(
     throw new Error(`Context version conflict: expected ${currentVersion}, got ${current.context_version}`);
   }
 
-  // If preferred_date changed, clear slot-related fields
+  // If preferred_date changed, clear stale slot fields unless this update explicitly selects a slot.
   if (updates.preferred_date && updates.preferred_date !== current.preferred_date) {
-    updates.available_slots = [];
-    updates.selected_slot = null;
-    updates.slots_page = 0;
-    updates.slots_generated_for_date = null;
+    if (!Object.prototype.hasOwnProperty.call(updates, 'available_slots')) {
+      updates.available_slots = [];
+    }
+    if (!Object.prototype.hasOwnProperty.call(updates, 'selected_slot')) {
+      updates.selected_slot = null;
+    }
+    if (!Object.prototype.hasOwnProperty.call(updates, 'slots_page')) {
+      updates.slots_page = 0;
+    }
+    if (!Object.prototype.hasOwnProperty.call(updates, 'slots_generated_for_date')) {
+      updates.slots_generated_for_date = null;
+    }
   }
 
   const newContext: ConversationContext = {

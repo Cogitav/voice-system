@@ -162,7 +162,7 @@ function buildSlotDisplay(slot: any): string {
 
   if (date && timeStart && timeEnd) return `${date} ${timeStart}-${timeEnd}`;
   if (date && timeStart) return `${date} ${timeStart}`;
-  return date ?? timeStart ?? 'Horario indisponivel';
+  return date ?? timeStart ?? 'Horário indisponível';
 }
 
 function buildConfirmedSnapshot(ctx: ConversationContext, slot?: any): any {
@@ -230,20 +230,20 @@ function buildOrchestrationSlotsReply(action: string, slots: any[] | null): stri
     case 'SHOW_EXISTING_SLOTS':
       return buildSlotsPresentationReply(
         slots,
-        'Tenho estes horarios disponiveis para essa data:',
-        'Indique o numero do horario que prefere.'
+        'Tenho estes horários disponíveis para essa data:',
+        'Indique o número do horário que prefere.'
       );
     case 'PROACTIVE_SLOTS':
       return buildSlotsPresentationReply(
         slots,
-        'Tenho estes horarios disponiveis:',
-        'Indique o numero do horario que prefere.'
+        'Tenho estes horários disponíveis:',
+        'Indique o número do horário que prefere.'
       );
     case 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES':
       return buildSlotsPresentationReply(
         slots,
-        'Nao tenho disponibilidade para a data pedida. Estas sao as proximas opcoes disponiveis:',
-        'Indique o numero do horario que prefere ou diga outra data.'
+        'Não tenho disponibilidade para a data pedida. Estas são as próximas opções disponíveis:',
+        'Indique o número do horário que prefere ou diga outra data.'
       );
     default:
       return null;
@@ -274,7 +274,7 @@ function getMissingBookingFieldLabels(
     customer_name: 'nome completo',
     customer_email: 'email',
     customer_phone: 'telefone',
-    customer_reason: 'motivo da marcacao',
+    customer_reason: 'motivo da marcação',
   };
 
   return Array.from(new Set(fields.map((field) => labels[field] ?? field)));
@@ -286,10 +286,10 @@ function buildMissingDataPrompt(fieldLabels: string[]): string {
   }
 
   if (fieldLabels.length === 1) {
-    return `Para continuar, so preciso do seu ${fieldLabels[0]}.`;
+    return `Para continuar, só preciso do seu ${fieldLabels[0]}.`;
   }
 
-  return `Para continuar, so preciso dos seguintes dados: ${fieldLabels.join(', ')}.`;
+  return `Para continuar, só preciso dos seguintes dados: ${fieldLabels.join(', ')}.`;
 }
 
 function summarizeSlotForLog(slot: any): Record<string, unknown> | null {
@@ -329,6 +329,86 @@ function extractExplicitPtTime(userMessage: string): string | null {
   }
 
   return null;
+}
+
+interface InvalidExplicitTimeInput {
+  raw: string;
+  suggested_time: string | null;
+  reason: string;
+}
+
+function buildTimeSuggestion(hour: number, minuteText: string): string | null {
+  if (hour < 0 || hour > 23) return null;
+
+  // Common PT chat typo: "19h390" normally means "19h30".
+  if (minuteText.length === 3 && minuteText.endsWith('0')) {
+    const inferredMinute = Number(`${minuteText[0]}${minuteText[2]}`);
+    if (inferredMinute >= 0 && inferredMinute <= 59) {
+      return `${String(hour).padStart(2, '0')}:${String(inferredMinute).padStart(2, '0')}`;
+    }
+  }
+
+  return null;
+}
+
+function detectInvalidExplicitPtTime(userMessage: string): InvalidExplicitTimeInput | null {
+  const normalized = normalizeSignalText(userMessage).replace(/\s+/g, ' ').trim();
+  const patterns = [
+    /\b(\d{1,2})\s*h\s*(\d{2,})\b/,
+    /\b(?:para\s+)?(?:as|a|pelas)\s+(\d{1,2})\s*h\s*(\d{2,})\b/,
+    /\b(\d{1,2})[:.](\d{2,})\b/,
+    /\b(?:para\s+)?(?:as|a|pelas)\s+(\d{1,2})[:.](\d{2,})\b/,
+    /\b(\d{1,2})\s*h\b/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+
+    const raw = match[0];
+    const hour = Number(match[1]);
+    const minuteText = match[2] ?? '00';
+    const minute = Number(minuteText);
+
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+      return { raw, suggested_time: null, reason: 'invalid_hour' };
+    }
+
+    if (minuteText.length > 2 || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+      return {
+        raw,
+        suggested_time: buildTimeSuggestion(hour, minuteText),
+        reason: minuteText.length > 2 ? 'malformed_minutes' : 'invalid_minutes',
+      };
+    }
+  }
+
+  return null;
+}
+
+function isAvailabilityQuestion(userMessage: string): boolean {
+  const normalized = normalizeSignalText(userMessage);
+  const availabilitySignal =
+    /\b(disponibilidade|disponivel|disponiveis|vaga|vagas|horario|horarios|data|datas|agenda)\b/.test(normalized);
+  const questionSignal =
+    /\b(quando|tem|ha|existe|existem|que|quais|mostra|mostrar|ver|disponibilidade|vaga|vagas|horario|horarios)\b/.test(normalized);
+
+  return availabilitySignal && questionSignal;
+}
+
+function hasRequiredCustomerDataForAvailability(
+  ctx: ConversationContext,
+  requirePhone: boolean,
+): boolean {
+  return !!ctx.service_id &&
+    !!ctx.customer_name &&
+    !!ctx.customer_email &&
+    (!requirePhone || !!ctx.customer_phone);
+}
+
+function appendConfirmationReminder(answer: string): string {
+  const reminder = 'Se estiver tudo certo, responda sim para confirmar este agendamento.';
+  return answer.includes(reminder) ? answer : `${answer}\n\n${reminder}`;
 }
 
 function isPriceQuestion(userMessage: string): boolean {
@@ -408,18 +488,23 @@ function formatServicePrice(amount: number, currency: string | null | undefined)
   return (currency ?? 'EUR').toUpperCase() === 'EUR' ? `${formatted} €` : `${formatted} ${currency ?? 'EUR'}`;
 }
 
-function buildServicePriceAnswer(service: SchedulingService, now: Date): string | null {
+function buildServicePriceAnswer(
+  service: SchedulingService,
+  now: Date,
+  hasPendingConfirmation = false,
+): string | null {
   const price = toMoneyNumber(service.price);
   const promoPrice = toMoneyNumber(service.promo_price);
   const currency = service.currency ?? 'EUR';
+  const followUp = hasPendingConfirmation ? 'Quer confirmar este agendamento?' : 'Quer marcar?';
 
   if (price === null && promoPrice === null) return null;
   if (promoPrice !== null && isPromoActive(service, now)) {
     const original = price !== null ? ` em vez de ${formatServicePrice(price, currency)}` : '';
-    return `${service.name} esta em promocao por ${formatServicePrice(promoPrice, currency)}${original}. Quer marcar?`;
+    return `${service.name} está em promoção por ${formatServicePrice(promoPrice, currency)}${original}. ${followUp}`;
   }
   if (price !== null) {
-    return `${service.name} tem o preco de ${formatServicePrice(price, currency)}. Quer marcar?`;
+    return `${service.name} tem o preço de ${formatServicePrice(price, currency)}. ${followUp}`;
   }
   return null;
 }
@@ -792,11 +877,16 @@ function logTimeOperatorDebug(
 function buildSlotSelectionUpdates(
   context: ConversationContext,
   selectedSlot: SlotSuggestion,
-  state: ConversationContext['state']
+  state: ConversationContext['state'],
+  currentIntent: ConversationContext['current_intent'] = 'SLOT_SELECTION'
 ): Partial<ConversationContext> {
   const updates: Partial<ConversationContext> = {
+    available_slots: context.available_slots,
     selected_slot: selectedSlot,
     preferred_date: extractDate(selectedSlot),
+    preferred_time: extractTimeStart(selectedSlot),
+    slots_generated_for_date: context.slots_generated_for_date,
+    current_intent: currentIntent,
     state,
   };
 
@@ -807,6 +897,21 @@ function buildSlotSelectionUpdates(
   }
 
   return updates;
+}
+
+function logSelectedSlotPersisted(
+  conversationId: string,
+  context: ConversationContext,
+  selectedSlot: SlotSuggestion
+): void {
+  logFlow('[FLOW_SELECTED_SLOT_PERSISTED]', {
+    conversation_id: conversationId,
+    selected_slot_start: selectedSlot.start ?? null,
+    selected_slot_end: selectedSlot.end ?? null,
+    selected_slot_resource_id: selectedSlot.resource_id ?? null,
+    state_after_persist: context.state ?? null,
+    available_slots_count: context.available_slots?.length ?? 0,
+  });
 }
 
 // =============================================================================
@@ -924,6 +1029,34 @@ serve(async (req) => {
       sender_type: 'client',
       content: userMessage,
     });
+
+    const invalidExplicitTime = detectInvalidExplicitPtTime(userMessage);
+    if (invalidExplicitTime) {
+      const reply = invalidExplicitTime.suggested_time
+        ? `Quis dizer ${invalidExplicitTime.suggested_time}?`
+        : 'Não consegui perceber o horário. Indique um horário válido, por exemplo 17h30 ou 17:30.';
+
+      logFlow('[FLOW_INVALID_TIME_INPUT]', {
+        conversation_id: conversationId,
+        state: context.state ?? null,
+        raw_user_text: userMessage,
+        raw_time: invalidExplicitTime.raw,
+        suggested_time: invalidExplicitTime.suggested_time,
+        reason: invalidExplicitTime.reason,
+      });
+
+      await db.from('messages').insert({
+        conversation_id: conversationId,
+        sender_type: 'ai',
+        content: reply,
+      });
+
+      await consumeCredits(empresaId, 'message', conversationId);
+
+      return new Response(JSON.stringify({ reply }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // -------------------------------------------------------------------------
     // 4. Single LLM extraction call (intent + entities + emotion)
@@ -1591,15 +1724,15 @@ serve(async (req) => {
             : match.match_strategy === 'after'
               ? `Para depois das ${requestedTime}, tenho as ${matchedTime}. Pode ser?`
               : match.match_strategy === 'relative_earlier'
-                ? `Tenho uma opcao mais cedo as ${matchedTime}. Pode ser?`
+                ? `Tenho uma opção mais cedo às ${matchedTime}. Pode ser?`
                 : match.match_strategy === 'relative_later'
-                  ? `Tenho uma opcao mais tarde as ${matchedTime}. Pode ser?`
-                  : `Nao temos exatamente as ${requestedTime}, mas temos as ${matchedTime}. Pode ser?`;
+                  ? `Tenho uma opção mais tarde às ${matchedTime}. Pode ser?`
+                  : `Não temos exatamente às ${requestedTime}, mas temos às ${matchedTime}. Pode ser?`;
 
         if (missingFieldLabels.length > 0) {
           updatedContext = await updateContext(
             conversationId,
-            buildSlotSelectionUpdates(updatedContext, matchedSlot, 'collecting_data'),
+            buildSlotSelectionUpdates(updatedContext, matchedSlot, 'collecting_data', 'TIME_BASED_SELECTION'),
             updatedContext.context_version
           );
 
@@ -1610,9 +1743,10 @@ serve(async (req) => {
 
         updatedContext = await updateContext(
           conversationId,
-          buildSlotSelectionUpdates(updatedContext, matchedSlot, 'awaiting_confirmation'),
+          buildSlotSelectionUpdates(updatedContext, matchedSlot, 'awaiting_confirmation', 'TIME_BASED_SELECTION'),
           updatedContext.context_version
         );
+        logSelectedSlotPersisted(conversationId, updatedContext, matchedSlot);
 
         reply = isExact
           ? HARDCODED_TEMPLATES.awaiting_confirmation(buildConfirmedSnapshot(updatedContext, matchedSlot))
@@ -1631,19 +1765,19 @@ serve(async (req) => {
       }, updatedContext.context_version);
 
       const fallbackIntro = match.match_strategy === 'before'
-        ? `Nao encontrei horario disponivel antes das ${requestedTime}. Estes sao os horarios mais proximos:`
+        ? `Não encontrei horário disponível antes das ${requestedTime}. Estes são os horários mais próximos:`
         : match.match_strategy === 'after'
-          ? `Nao encontrei horario disponivel depois das ${requestedTime}. Estes sao os horarios mais proximos:`
+          ? `Não encontrei horário disponível depois das ${requestedTime}. Estes são os horários mais próximos:`
           : match.match_strategy === 'relative_earlier'
-            ? 'Nao encontrei uma opcao mais cedo. Estes sao os horarios mais proximos:'
+            ? 'Não encontrei uma opção mais cedo. Estes são os horários mais próximos:'
             : match.match_strategy === 'relative_later'
-              ? 'Nao encontrei uma opcao mais tarde. Estes sao os horarios mais proximos:'
-              : `Nao encontrei um horario proximo de ${requestedTime}. Estes sao os horarios mais proximos:`;
+              ? 'Não encontrei uma opção mais tarde. Estes são os horários mais próximos:'
+              : `Não encontrei um horário próximo de ${requestedTime}. Estes são os horários mais próximos:`;
 
       reply = buildSlotsPresentationReply(
         updatedContext.available_slots,
         fallbackIntro,
-        'Indique o numero do horario que prefere.'
+        'Indique o número do horário que prefere.'
       );
     };
 
@@ -1656,13 +1790,13 @@ serve(async (req) => {
       });
 
       if (!updatedContext.selected_slot) {
-        reply = 'Para remarcar, preciso que escolha primeiro o novo horario.';
+        reply = 'Para remarcar, preciso que escolha primeiro o novo horário.';
         return;
       }
 
       const creditReschedule = await checkCredits(empresaId, 'booking_reschedule');
       if (!creditReschedule.allowed) {
-        reply = 'Nao foi possivel remarcar o agendamento: creditos insuficientes.';
+        reply = 'Não foi possível remarcar o agendamento: créditos insuficientes.';
         return;
       }
 
@@ -1758,7 +1892,7 @@ serve(async (req) => {
           ? buildSlotsPresentationReply(
             recoverySlots,
             ERROR_MESSAGES.system.slot_conflict,
-            'Indique o numero do horario que prefere.'
+            'Indique o número do horário que prefere.'
           )
           : ERROR_MESSAGES.system.slot_conflict;
         return;
@@ -1782,7 +1916,7 @@ serve(async (req) => {
 
       const creditBooking = await checkCredits(empresaId, 'booking_create');
       if (!creditBooking.allowed) {
-        reply = 'NÃ£o foi possÃ­vel criar o agendamento: crÃ©ditos insuficientes.';
+        reply = 'Não foi possível criar o agendamento: créditos insuficientes.';
         return;
       }
 
@@ -1945,7 +2079,7 @@ serve(async (req) => {
           ? buildSlotsPresentationReply(
             recoverySlots,
             ERROR_MESSAGES.system.slot_conflict,
-            'Indique o numero do horario que prefere.'
+            'Indique o número do horário que prefere.'
           )
           : ERROR_MESSAGES.system.slot_conflict;
         return;
@@ -1977,9 +2111,9 @@ serve(async (req) => {
           await triggerHandoff(conversationId, empresaId, updatedContext, 'Booking creation failed repeatedly');
           reply = ERROR_MESSAGES.system.general_failure;
         } else if (updatedContext.selected_slot) {
-          reply = 'Houve um problema tecnico ao criar o agendamento. O horario continua selecionado; pode responder "sim" para tentar novamente ou escolher outro horario.';
+          reply = 'Houve um problema técnico ao criar o agendamento. O horário continua selecionado; pode responder "sim" para tentar novamente ou escolher outro horário.';
         } else {
-          reply = 'Houve um problema tecnico ao criar o agendamento. Pode escolher novamente um dos horarios disponiveis.';
+          reply = 'Houve um problema técnico ao criar o agendamento. Pode escolher novamente um dos horários disponíveis.';
         }
         return;
       }
@@ -2001,20 +2135,24 @@ serve(async (req) => {
       }
     };
 
-    // --- 9a. INFO_REQUEST → knowledge base, no state change ---
-    if (isPriceQuestion(userMessage)) {
+    const hasPendingConfirmation =
+      updatedContext.state === 'awaiting_confirmation' && !!updatedContext.selected_slot;
+
+    const answerServicePriceQuestion = async (preservePendingConfirmation = false): Promise<string> => {
       const services = await getServices();
       const currentService = findServiceById(services, updatedContext.service_id);
       let matchedService = currentService;
       let lookupSource = currentService ? 'current_service' : 'none';
-      let priceAnswer = matchedService ? buildServicePriceAnswer(matchedService, new Date()) : null;
+      let priceAnswer = matchedService
+        ? buildServicePriceAnswer(matchedService, new Date(), preservePendingConfirmation)
+        : null;
 
       if (!priceAnswer) {
         const serviceFromText = findServiceByText(services, userMessage, extraction);
         if (serviceFromText) {
           matchedService = serviceFromText;
           lookupSource = 'message_service_match';
-          priceAnswer = buildServicePriceAnswer(serviceFromText, new Date());
+          priceAnswer = buildServicePriceAnswer(serviceFromText, new Date(), preservePendingConfirmation);
         }
       }
 
@@ -2026,19 +2164,192 @@ serve(async (req) => {
         matched_service_name: matchedService?.name ?? null,
         lookup_source: lookupSource,
         has_configured_price: !!priceAnswer,
+        confirmation_preserved: preservePendingConfirmation,
       });
 
-      reply = priceAnswer ??
+      const fallbackFollowUp = preservePendingConfirmation
+        ? 'Quer confirmar este agendamento?'
+        : 'Quer que avancemos com a marcação?';
+      const answer = priceAnswer ??
         (matchedService
-          ? `Nao tenho preco configurado para ${matchedService.name}. Quer que avancemos com a marcacao?`
-          : 'Nao consegui identificar o servico para consultar o preco. Pode indicar qual o servico?');
+          ? `Não tenho preço configurado para ${matchedService.name}. ${fallbackFollowUp}`
+          : 'Não consegui identificar o serviço para consultar o preço. Pode indicar qual o serviço?');
 
       logFlow('[FLOW_SERVICE_PRICE_ANSWER]', {
         conversation_id: conversationId,
         service_id: matchedService?.id ?? null,
         service_name: matchedService?.name ?? null,
         answered_from_service_config: !!priceAnswer,
+        confirmation_preserved: preservePendingConfirmation,
       });
+
+      return answer;
+    };
+
+    const answerGeneralInfoQuestion = async (): Promise<string> => {
+      const knowledge = await answerFromKnowledge(userMessage, empresaId, agentId, agentPrompt);
+      if (knowledge.found && knowledge.answer) {
+        await consumeCredits(empresaId, 'knowledge_lookup');
+        return knowledge.answer;
+      }
+
+      const directive = buildResponseDirective({
+        state: updatedContext.state,
+        mustSayBlocks: [{
+          type: 'inform',
+          content: 'Responde à questão do utilizador com base no conhecimento da empresa. Sê directo e útil.',
+          priority: 1,
+        }],
+        confirmedData: buildConfirmedSnapshot(updatedContext),
+        emotionalContext: emotionalContext as any,
+        language: 'pt-PT',
+      });
+
+      return await generateResponse(
+        userMessage,
+        updatedContext,
+        serializeDirectiveToPrompt(directive),
+        null,
+        agentCtx,
+        empresaId,
+      );
+    };
+
+    const handleAvailabilityQuestion = async (): Promise<boolean> => {
+      if (
+        !isAvailabilityQuestion(userMessage) ||
+        isPriceQuestion(userMessage) ||
+        !hasRequiredCustomerDataForAvailability(updatedContext, requirePhone) ||
+        updatedContext.state === 'booking_processing'
+      ) {
+        return false;
+      }
+
+      const bookingFlowIntent: 'RESCHEDULE' | 'BOOKING_NEW' = updatedContext.reschedule_from_agendamento_id
+        ? 'RESCHEDULE'
+        : 'BOOKING_NEW';
+
+      logFlow('[FLOW_AVAILABILITY_QUESTION]', {
+        conversation_id: conversationId,
+        stage: 'start',
+        state: updatedContext.state ?? null,
+        service_id: updatedContext.service_id ?? null,
+        preferred_date: updatedContext.preferred_date ?? null,
+        has_customer_data: true,
+      });
+
+      const orchestrationContext = {
+        ...updatedContext,
+        state: 'collecting_data' as const,
+        current_intent: bookingFlowIntent,
+        selected_slot: null,
+        reschedule_new_slot: null,
+        available_slots: [],
+        slots_page: 0,
+        slots_generated_for_date: null,
+      };
+      const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason);
+      updatedContext = await updateContext(conversationId, {
+        ...orchestration.context_updates,
+        current_intent: bookingFlowIntent,
+      }, updatedContext.context_version);
+
+      const hasSlots =
+        orchestration.action === 'SHOW_SLOTS' ||
+        orchestration.action === 'SHOW_EXISTING_SLOTS' ||
+        orchestration.action === 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES' ||
+        orchestration.action === 'SINGLE_SLOT_CONFIRM' ||
+        orchestration.action === 'PROACTIVE_SLOTS';
+      const slotReply = buildOrchestrationSlotsReply(
+        orchestration.action,
+        hasSlots ? (orchestration.slots ?? null) : null,
+      );
+
+      if (slotReply) {
+        reply = slotReply;
+      } else {
+        reply = await generateResponse(
+          userMessage,
+          updatedContext,
+          orchestration.response_hint,
+          hasSlots ? (orchestration.slots ?? null) : null,
+          agentCtx,
+          empresaId,
+        );
+      }
+
+      logFlow('[FLOW_AVAILABILITY_QUESTION]', {
+        conversation_id: conversationId,
+        stage: 'result',
+        action: orchestration.action,
+        slots_count: orchestration.slots?.length ?? 0,
+        preferred_date: updatedContext.preferred_date ?? null,
+        state: updatedContext.state ?? null,
+      });
+
+      return true;
+    };
+
+    // --- 9a. INFO_REQUEST → knowledge base, no state change ---
+    if (updatedContext.state === 'awaiting_confirmation' && !updatedContext.selected_slot) {
+      logFlow('[FLOW_BRANCH]', {
+        conversation_id: conversationId,
+        branch: 'AWAITING_CONFIRMATION_MISSING_SELECTED_SLOT',
+        source: 'defensive_recovery',
+        state: updatedContext.state ?? null,
+        action: decision.action ?? null,
+      });
+
+      const bookingFlowIntent: 'RESCHEDULE' | 'BOOKING_NEW' = updatedContext.reschedule_from_agendamento_id
+        ? 'RESCHEDULE'
+        : 'BOOKING_NEW';
+      const recoveryContext = {
+        ...updatedContext,
+        state: 'collecting_data' as const,
+        current_intent: bookingFlowIntent,
+        selected_slot: null,
+        reschedule_new_slot: null,
+      };
+      const orchestration = await orchestrateBooking(recoveryContext, empresaId, requirePhone, requireReason);
+      updatedContext = await updateContext(conversationId, {
+        ...orchestration.context_updates,
+        selected_slot: null,
+        reschedule_new_slot: null,
+        current_intent: bookingFlowIntent,
+      }, updatedContext.context_version);
+
+      const hasSlots =
+        orchestration.action === 'SHOW_SLOTS' ||
+        orchestration.action === 'SHOW_EXISTING_SLOTS' ||
+        orchestration.action === 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES' ||
+        orchestration.action === 'SINGLE_SLOT_CONFIRM' ||
+        orchestration.action === 'PROACTIVE_SLOTS';
+      const slotReply = buildOrchestrationSlotsReply(
+        orchestration.action,
+        hasSlots ? (orchestration.slots ?? null) : null,
+      );
+
+      reply = slotReply ??
+        'A seleção do horário não ficou disponível para confirmação. Escolha novamente um horário para eu confirmar o agendamento.';
+
+    } else if (hasPendingConfirmation && (isPriceQuestion(userMessage) || intent === 'INFO_REQUEST' || decision.action === 'ANSWER_INFO')) {
+      const infoReply = isPriceQuestion(userMessage)
+        ? await answerServicePriceQuestion(true)
+        : await answerGeneralInfoQuestion();
+      reply = appendConfirmationReminder(infoReply);
+
+      logFlow('[FLOW_INFO_ANSWER_CONFIRMATION_PRESERVED]', {
+        conversation_id: conversationId,
+        state: updatedContext.state ?? null,
+        selected_slot_start: updatedContext.selected_slot?.start ?? null,
+        info_type: isPriceQuestion(userMessage) ? 'price' : 'general',
+      });
+
+    } else if (await handleAvailabilityQuestion()) {
+      // Reply is set by handleAvailabilityQuestion; keep booking context action-driven.
+
+    } else if (isPriceQuestion(userMessage)) {
+      reply = await answerServicePriceQuestion(false);
 
     } else if (!decisionActionSupported) {
       logFlow('[FLOW_BRANCH]', {
@@ -2050,8 +2361,8 @@ serve(async (req) => {
       });
 
       reply = isActiveBookingState
-        ? 'Pode dizer se quer escolher outro horario, confirmar a marcacao ou indicar os dados em falta?'
-        : 'Pode reformular o pedido? Posso ajudar a marcar, remarcar, cancelar ou esclarecer uma duvida.';
+        ? 'Pode dizer se quer escolher outro horário, confirmar este agendamento ou indicar os dados em falta?'
+        : 'Pode reformular o pedido? Posso ajudar a marcar, remarcar, cancelar ou esclarecer uma dúvida.';
 
     } else if (
       (decision.action === 'ANSWER_INFO' && !isActiveBookingState) ||
@@ -2228,8 +2539,8 @@ serve(async (req) => {
           mustSayBlocks: [{
             type: 'ask_service',
             content: updatedContext.customer_name
-              ? `O utilizador ja forneceu dados pessoais. Agradece brevemente e pergunta qual o servico ou motivo da consulta, sem voltar a pedir dados pessoais.`
-              : 'Identifica o servico pretendido de forma empatica e sem pedir dados pessoais ainda.',
+              ? `O utilizador já forneceu dados pessoais. Agradece brevemente e pergunta qual o serviço ou motivo da consulta, sem voltar a pedir dados pessoais.`
+              : 'Identifica o serviço pretendido de forma empática e sem pedir dados pessoais ainda.',
             priority: 1,
           }],
           confirmedData: buildConfirmedSnapshot(updatedContext),
@@ -2262,7 +2573,7 @@ serve(async (req) => {
           !!updatedContext.service_name && hasBookingContinuationSignal(userMessage, extraction);
 
         if (shouldUseDeterministicDatePrompt) {
-          reply = `Claro. Para avancar com ${updatedContext.service_name}, indique a data e hora que prefere. Se quiser, pode escrever algo como 'hoje as 12h30'.`;
+          reply = `Claro. Para avançar com ${updatedContext.service_name}, indique a data e hora que prefere. Se quiser, pode escrever algo como 'hoje às 12h30'.`;
         } else {
           const askDateContent = updatedContext.service_name
           ? `Pergunta de forma clara para que data prefere o agendamento de ${updatedContext.service_name}.`
@@ -2397,8 +2708,8 @@ serve(async (req) => {
         }, updatedContext.context_version);
         reply = buildSlotsPresentationReply(
           updatedContext.available_slots,
-          'Tenho estes horarios disponiveis para essa data:',
-          'Indique o numero do horario que prefere.'
+          'Tenho estes horários disponíveis para essa data:',
+          'Indique o número do horário que prefere.'
         );
 
       } else if (decision.action === 'SLOT_SEARCH_BY_TIME' && updatedContext.available_slots.length > 0) {
@@ -2460,6 +2771,7 @@ serve(async (req) => {
               buildSlotSelectionUpdates(updatedContext, selectedSlot, 'awaiting_confirmation'),
               updatedContext.context_version
             );
+            logSelectedSlotPersisted(conversationId, updatedContext, selectedSlot);
 
             reply = HARDCODED_TEMPLATES.awaiting_confirmation(
               buildConfirmedSnapshot(updatedContext, selectedSlot)
@@ -2471,8 +2783,8 @@ serve(async (req) => {
           }, updatedContext.context_version);
           reply = buildSlotsPresentationReply(
             updatedContext.available_slots,
-            'O horario indicado nao esta na lista. Estes sao os horarios disponiveis:',
-            'Indique o numero do horario que prefere.'
+            'O horário indicado não está na lista. Estes são os horários disponíveis:',
+            'Indique o número do horário que prefere.'
           );
         }
 
@@ -2517,7 +2829,7 @@ serve(async (req) => {
         if (updatedContext.selected_slot) {
           await processRescheduleBooking('decision');
         } else {
-          reply = 'Para remarcar, preciso que escolha primeiro o novo horario.';
+          reply = 'Para remarcar, preciso que escolha primeiro o novo horário.';
         }
 
       } else if (isActiveBookingState && decisionActionSupported) {
@@ -2530,8 +2842,8 @@ serve(async (req) => {
         });
 
         reply = updatedContext.available_slots.length > 0
-          ? 'Pode indicar o numero do horario que prefere, dizer outro horario ou confirmar a marcacao.'
-          : 'Pode dizer qual o servico, data ou dados que pretende ajustar para eu continuar?';
+          ? 'Pode indicar o número do horário que prefere, dizer outro horário ou confirmar este agendamento.'
+          : 'Pode dizer qual o serviço, data ou dados que pretende ajustar para eu continuar?';
 
       // === 9d.1 awaiting_confirmation ===
       } else if (updatedContext.state === 'awaiting_confirmation') {
@@ -2545,8 +2857,8 @@ serve(async (req) => {
         });
 
         reply = updatedContext.selected_slot
-          ? 'Pode responder "sim" para confirmar, indicar o numero do horario ou dizer outro horario.'
-          : 'Preciso que confirme ou indique o horario pretendido para continuar.';
+          ? 'Pode responder "sim" para confirmar este agendamento, indicar o número do horário ou dizer outro horário.'
+          : 'Preciso que confirme ou indique o horário pretendido para continuar.';
 
         if (false) {
         // ---- Confirmation accepted ----
@@ -2596,8 +2908,8 @@ serve(async (req) => {
               updatedContext = await updateContext(conversationId, { state: 'awaiting_slot_selection' }, updatedContext.context_version);
               reply = buildSlotsPresentationReply(
                 updatedContext.available_slots,
-                'Esse horario nao esta disponivel. Estes sao os horarios disponiveis:',
-                'Indique o numero do horario que prefere.'
+                'Esse horário não está disponível. Estes são os horários disponíveis:',
+                'Indique o número do horário que prefere.'
               );
             }
           } else {
@@ -2637,8 +2949,8 @@ serve(async (req) => {
         });
 
         reply = updatedContext.available_slots.length > 0
-          ? 'Pode indicar o numero do horario que prefere ou dizer outro horario.'
-          : 'Preciso que escolha um dos horarios disponiveis para continuar.';
+          ? 'Pode indicar o número do horário que prefere ou dizer outro horário.'
+          : 'Preciso que escolha um dos horários disponíveis para continuar.';
 
         if (false) {
         const selectionResult = resolveSlotSelectionFromContext(updatedContext, userMessage);
@@ -2691,8 +3003,8 @@ serve(async (req) => {
           // No match — re-present existing slots without regenerating
           reply = buildSlotsPresentationReply(
             updatedContext.available_slots,
-            'O horario indicado nao esta na lista. Estes sao os horarios disponiveis:',
-            'Indique o numero do horario que prefere.'
+            'O horário indicado não está na lista. Estes são os horários disponíveis:',
+            'Indique o número do horário que prefere.'
           );
         }
 
@@ -2711,8 +3023,8 @@ serve(async (req) => {
         if (true) {
           // Phase 1 / Sprint 4: collecting_service must be driven by decision.action only.
           reply = updatedContext.service_id
-            ? 'Ja tenho o servico. Pode indicar a data pretendida para continuar.'
-            : 'Preciso que indique o servico pretendido para continuar.';
+            ? 'Já tenho o serviço. Pode indicar a data pretendida para continuar.'
+            : 'Preciso que indique o serviço pretendido para continuar.';
         } else if (updatedContext.service_id) {
           // Service resolved this turn → advance to orchestrator (will go to collecting_data or slots)
           const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
@@ -2824,7 +3136,7 @@ serve(async (req) => {
           if (true) {
             // Phase 1 / Sprint 4: collecting_data must be driven by decision.action only.
             reply = updatedContext.available_slots.length > 0
-              ? 'Pode indicar o numero do horario que prefere ou dizer outro horario.'
+              ? 'Pode indicar o número do horário que prefere ou dizer outro horário.'
               : 'Pode indicar a data pretendida ou os dados em falta para continuar.';
           } else {
             const preOrchestrationContext = {
@@ -2879,8 +3191,8 @@ serve(async (req) => {
       if (true) {
         // Phase 1 / Sprint 4: generic fallback must never start or mutate booking flow.
         reply = updatedContext.state === 'idle'
-          ? 'Pode dizer se quer marcar, remarcar, cancelar ou esclarecer uma duvida.'
-          : 'Nao consegui determinar o proximo passo com seguranca. Pode reformular o que pretende fazer?';
+          ? 'Pode dizer se quer marcar, remarcar, cancelar ou esclarecer uma dúvida.'
+          : 'Não consegui determinar o próximo passo com segurança. Pode reformular o que pretende fazer?';
       } else {
         const nextState = updatedContext.service_id ? 'collecting_data' : 'collecting_service';
         updatedContext = await updateContext(conversationId, {
