@@ -25,7 +25,7 @@ import { triggerHandoff } from '../_shared/handoff-manager.ts';
 import { createLeadIfEligible } from '../_shared/lead-manager.ts';
 import { checkCredits, consumeCredits } from '../_shared/credit-manager.ts';
 import { canTransition } from '../_shared/state-machine.ts';
-import { log } from '../_shared/logger.ts';
+import { log, logAgentEvent } from '../_shared/logger.ts';
 import { ConversationContext, ConversationState, LLMExtraction, SchedulingService, SlotSuggestion } from '../_shared/types.ts';
 import { decideNextAction } from '../_shared/decision-engine.ts';
 import type { ActionType } from '../_shared/action-types.ts';
@@ -304,6 +304,40 @@ function summarizeSlotForLog(slot: any): Record<string, unknown> | null {
 
 function logFlow(prefix: string, payload: Record<string, unknown>): void {
   console.log(prefix, JSON.stringify(payload));
+}
+
+function redactEmailForLog(email?: string | null): { redacted: string | null; domain: string | null } {
+  if (!email || !email.includes('@')) {
+    return { redacted: null, domain: null };
+  }
+
+  const [localPart, domain] = email.split('@');
+  if (!localPart || !domain) {
+    return { redacted: null, domain: null };
+  }
+
+  const visiblePrefix = localPart.slice(0, Math.min(2, localPart.length));
+  return {
+    redacted: `${visiblePrefix}***@${domain}`,
+    domain,
+  };
+}
+
+function buildAgentEventPayload(
+  context: ConversationContext,
+  extras: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const email = redactEmailForLog(context.customer_email);
+  return {
+    state: context.state ?? null,
+    selected_slot: summarizeSlotForLog(context.selected_slot),
+    service_id: context.service_id ?? null,
+    service_name: context.service_name ?? null,
+    customer_email_redacted: email.redacted,
+    customer_email_domain: email.domain,
+    current_intent: context.current_intent ?? null,
+    ...extras,
+  };
 }
 
 function extractExplicitPtTime(userMessage: string): string | null {
@@ -904,14 +938,21 @@ function logSelectedSlotPersisted(
   context: ConversationContext,
   selectedSlot: SlotSuggestion
 ): void {
-  logFlow('[FLOW_SELECTED_SLOT_PERSISTED]', {
+  const payload = {
     conversation_id: conversationId,
     selected_slot_start: selectedSlot.start ?? null,
     selected_slot_end: selectedSlot.end ?? null,
     selected_slot_resource_id: selectedSlot.resource_id ?? null,
     state_after_persist: context.state ?? null,
     available_slots_count: context.available_slots?.length ?? 0,
-  });
+  };
+
+  logFlow('[FLOW_SELECTED_SLOT_PERSISTED]', payload);
+  void logAgentEvent(
+    'FLOW_SELECTED_SLOT_PERSISTED',
+    buildAgentEventPayload(context, payload),
+    conversationId,
+  );
 }
 
 // =============================================================================
@@ -1036,14 +1077,21 @@ serve(async (req) => {
         ? `Quis dizer ${invalidExplicitTime.suggested_time}?`
         : 'Não consegui perceber o horário. Indique um horário válido, por exemplo 17h30 ou 17:30.';
 
-      logFlow('[FLOW_INVALID_TIME_INPUT]', {
+      const invalidTimePayload = {
         conversation_id: conversationId,
         state: context.state ?? null,
         raw_user_text: userMessage,
         raw_time: invalidExplicitTime.raw,
         suggested_time: invalidExplicitTime.suggested_time,
         reason: invalidExplicitTime.reason,
-      });
+      };
+
+      logFlow('[FLOW_INVALID_TIME_INPUT]', invalidTimePayload);
+      void logAgentEvent(
+        'FLOW_INVALID_TIME_INPUT',
+        buildAgentEventPayload(context, invalidTimePayload),
+        conversationId,
+      );
 
       await db.from('messages').insert({
         conversation_id: conversationId,
@@ -1834,13 +1882,22 @@ serve(async (req) => {
           error_context: resetErrorCount(updatedContext.error_context),
         }, updatedContext.context_version);
 
-        logFlow('[FLOW_RESCHEDULE_SUCCESS]', {
+        const rescheduleSuccessPayload = {
           conversation_id: conversationId,
           original_agendamento_id: updatedContext.agendamento_id ?? result.agendamento_id,
           new_agendamento_id: result.agendamento_id,
           new_slot_start: confirmedSlot.start,
           new_slot_resource_id: confirmedSlot.resource_id ?? null,
-        });
+          decision_action: decision.action,
+          source: source,
+        };
+
+        logFlow('[FLOW_RESCHEDULE_SUCCESS]', rescheduleSuccessPayload);
+        void logAgentEvent(
+          'FLOW_RESCHEDULE_SUCCESS',
+          buildAgentEventPayload(updatedContext, rescheduleSuccessPayload),
+          conversationId,
+        );
 
         reply = HARDCODED_TEMPLATES.booking_confirmed(buildConfirmedSnapshot(updatedContext));
         return;
@@ -2023,12 +2080,21 @@ serve(async (req) => {
           }, updatedContext.context_version);
         }
 
-        logFlow('[FLOW_BOOKING_CONFIRMED_CONTEXT_SAVED]', {
+        const bookingConfirmedPayload = {
           conversation_id: conversationId,
           agendamento_id: result.agendamento_id,
           state: updatedContext.state ?? null,
           confirmed_snapshot_start: updatedContext.confirmed_snapshot?.start ?? null,
-        });
+          decision_action: decision.action,
+          source,
+        };
+
+        logFlow('[FLOW_BOOKING_CONFIRMED_CONTEXT_SAVED]', bookingConfirmedPayload);
+        void logAgentEvent(
+          'FLOW_BOOKING_CONFIRMED_CONTEXT_SAVED',
+          buildAgentEventPayload(updatedContext, bookingConfirmedPayload),
+          conversationId,
+        );
 
         reply = HARDCODED_TEMPLATES.booking_confirmed(buildConfirmedSnapshot(updatedContext));
         await createLeadIfEligible(updatedContext, empresaId, agentId, conversationId);

@@ -26,6 +26,33 @@ export async function log(entry: LogEntry, level: LogLevel = 'info'): Promise<vo
   }
 }
 
+export function logAgentEvent(
+  event_type: string,
+  payload: Record<string, unknown> = {},
+  conversation_id?: string | null,
+): Promise<void> {
+  // TODO: Add a scheduled retention job to delete agent_logs older than 60 days.
+  const write = async () => {
+    try {
+      const db = getServiceClient();
+      await db.from('agent_logs').insert({
+        conversation_id: conversation_id ?? null,
+        event_type,
+        payload,
+      });
+    } catch {
+      // Observability must never affect the conversation flow.
+    }
+  };
+
+  const task = write();
+  const runtime = globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+  };
+  runtime.EdgeRuntime?.waitUntil?.(task);
+  return task;
+}
+
 export async function logAction(params: {
   empresa_id: string;
   agent_id: string;
