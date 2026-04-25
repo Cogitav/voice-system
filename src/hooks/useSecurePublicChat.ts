@@ -32,6 +32,62 @@ export interface WidgetBranding {
   avatarUrl: string | null;
 }
 
+interface RawWidgetBranding {
+  widget_primary_color?: string | null;
+  widget_secondary_color?: string | null;
+  widget_background_color?: string | null;
+  widget_user_message_color?: string | null;
+  widget_agent_message_color?: string | null;
+  widget_agent_text_color?: string | null;
+  widget_user_text_color?: string | null;
+  widget_input_background_color?: string | null;
+  widget_input_text_color?: string | null;
+  widget_button_color?: string | null;
+  widget_theme_mode?: WidgetBranding['themeMode'] | null;
+  widget_border_radius?: WidgetBranding['borderRadius'] | null;
+  widget_size?: WidgetBranding['size'] | null;
+  widget_header_text?: string | null;
+  widget_avatar_url?: string | null;
+}
+
+const DEFAULT_BRANDING: WidgetBranding = {
+  primaryColor: '#6366f1',
+  secondaryColor: '#8b5cf6',
+  backgroundColor: '#ffffff',
+  userMessageColor: '#6366f1',
+  agentMessageColor: '#f3f4f6',
+  userTextColor: '#ffffff',
+  agentTextColor: '#111827',
+  buttonColor: '#6366f1',
+  inputBackgroundColor: '#f3f4f6',
+  inputTextColor: '#111827',
+  themeMode: 'light',
+  borderRadius: 'normal',
+  size: 'medium',
+  headerText: '',
+  avatarUrl: null,
+};
+
+function resolvePublicChatBranding(raw?: RawWidgetBranding | null): WidgetBranding {
+  return {
+    primaryColor: raw?.widget_primary_color || DEFAULT_BRANDING.primaryColor,
+    secondaryColor: raw?.widget_secondary_color || DEFAULT_BRANDING.secondaryColor,
+    backgroundColor: raw?.widget_background_color || DEFAULT_BRANDING.backgroundColor,
+    userMessageColor: raw?.widget_user_message_color || DEFAULT_BRANDING.userMessageColor,
+    agentMessageColor: raw?.widget_agent_message_color || DEFAULT_BRANDING.agentMessageColor,
+    userTextColor: raw?.widget_user_text_color || DEFAULT_BRANDING.userTextColor,
+    agentTextColor: raw?.widget_agent_text_color || DEFAULT_BRANDING.agentTextColor,
+    buttonColor: raw?.widget_button_color || DEFAULT_BRANDING.buttonColor,
+    inputBackgroundColor: raw?.widget_input_background_color || DEFAULT_BRANDING.inputBackgroundColor,
+    inputTextColor: raw?.widget_input_text_color || DEFAULT_BRANDING.inputTextColor,
+    themeMode: raw?.widget_theme_mode || DEFAULT_BRANDING.themeMode,
+    borderRadius: raw?.widget_border_radius || DEFAULT_BRANDING.borderRadius,
+    size: raw?.widget_size || DEFAULT_BRANDING.size,
+    headerText: raw?.widget_header_text || DEFAULT_BRANDING.headerText,
+    avatarUrl: raw?.widget_avatar_url || DEFAULT_BRANDING.avatarUrl,
+  };
+}
+
 interface Conversation {
   id: string;
   status: 'ai_active' | 'waiting_human' | 'human_active' | 'closed';
@@ -115,7 +171,7 @@ export function useSecurePublicChat(empresaSlug: string | undefined) {
       if (!empresaSlug) return null;
       const result = await callPublicChat('get-empresa', { empresaSlug });
       if (result.branding) {
-        setBranding(result.branding as WidgetBranding);
+        setBranding(resolvePublicChatBranding(result.branding as RawWidgetBranding));
       }
       return result.empresa as Empresa;
     },

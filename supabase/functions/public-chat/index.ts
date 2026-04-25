@@ -36,7 +36,28 @@ serve(async (req) => {
 
       const { data: empresa } = await db
         .from('empresas')
-        .select('id, nome, slug, widget_primary_color, widget_theme_mode, widget_border_radius, widget_size, widget_header_text, widget_avatar_url, default_welcome_message, service_chat_enabled')
+        .select(`
+          id,
+          nome,
+          slug,
+          widget_primary_color,
+          widget_secondary_color,
+          widget_background_color,
+          widget_user_message_color,
+          widget_agent_message_color,
+          widget_agent_text_color,
+          widget_user_text_color,
+          widget_input_background_color,
+          widget_input_text_color,
+          widget_button_color,
+          widget_theme_mode,
+          widget_border_radius,
+          widget_size,
+          widget_header_text,
+          widget_avatar_url,
+          default_welcome_message,
+          service_chat_enabled
+        `)
         .eq('slug', empresaSlug)
         .eq('status', 'ativo')
         .single();
@@ -53,7 +74,31 @@ serve(async (req) => {
         .eq('status', 'ativo')
         .single();
 
-      return response({ empresa, agent });
+      const branding = {
+        widget_primary_color: empresa.widget_primary_color ?? null,
+        widget_secondary_color: empresa.widget_secondary_color ?? null,
+        widget_background_color: empresa.widget_background_color ?? null,
+        widget_user_message_color: empresa.widget_user_message_color ?? null,
+        widget_agent_message_color: empresa.widget_agent_message_color ?? null,
+        widget_agent_text_color: empresa.widget_agent_text_color ?? null,
+        widget_user_text_color: empresa.widget_user_text_color ?? null,
+        widget_input_background_color: empresa.widget_input_background_color ?? null,
+        widget_input_text_color: empresa.widget_input_text_color ?? null,
+        widget_button_color: empresa.widget_button_color ?? null,
+        widget_theme_mode: empresa.widget_theme_mode ?? null,
+        widget_border_radius: empresa.widget_border_radius ?? null,
+        widget_size: empresa.widget_size ?? null,
+        widget_header_text: empresa.widget_header_text ?? null,
+        widget_avatar_url: empresa.widget_avatar_url ?? null,
+      };
+
+      console.log('[FLOW_BRANDING_PAYLOAD_READY]', JSON.stringify({
+        empresa_id: empresa.id,
+        empresa_slug: empresa.slug,
+        branding_fields: Object.keys(branding),
+      }));
+
+      return response({ empresa, agent, branding });
     }
 
     // ACTION: init-conversation

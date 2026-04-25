@@ -17,12 +17,10 @@ import { ChatAvatar, getAvatarType, type AvatarType } from '@/components/convers
 const ChatMessage = React.memo(function ChatMessage({
   message,
   branding,
-  userMessageTextColor,
   isSending,
 }: {
   message: { id: string; sender_type: string; content: string; created_at: string };
   branding: WidgetBranding | null;
-  userMessageTextColor: string;
   isSending?: boolean;
 }) {
   const isClient = message.sender_type === 'client';
@@ -30,6 +28,12 @@ const ChatMessage = React.memo(function ChatMessage({
   
   // Use consistent avatar type
   const avatarType = getAvatarType(message.sender_type) as AvatarType;
+  const bubbleColor = isClient
+    ? (branding?.userMessageColor || 'var(--primary)')
+    : (branding?.agentMessageColor || 'var(--muted)');
+  const bubbleTextColor = isClient
+    ? (branding?.userTextColor || '#ffffff')
+    : (branding?.agentTextColor || 'var(--foreground)');
 
   // System messages - use dedicated component
   if (isSystem) {
@@ -49,13 +53,9 @@ const ChatMessage = React.memo(function ChatMessage({
       <div
         className="max-w-[80%] px-3 py-2"
         style={{
-          backgroundColor: isClient 
-            ? (branding?.agentMessageColor || 'var(--muted)')
-            : (branding?.userMessageColor || 'var(--primary)'),
+          backgroundColor: bubbleColor,
           borderRadius: 'var(--widget-message-radius, 8px)',
-          color: isClient 
-            ? 'var(--widget-text-primary, inherit)' 
-            : userMessageTextColor,
+          color: bubbleTextColor,
         }}
       >
         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
@@ -70,9 +70,8 @@ const ChatMessage = React.memo(function ChatMessage({
             <span
               className="text-xs"
               style={{
-                color: isClient 
-                  ? 'var(--widget-text-secondary, var(--muted-foreground))'
-                  : `${userMessageTextColor}b3`,
+                color: bubbleTextColor,
+                opacity: 0.7,
               }}
             >
               {format(new Date(message.created_at), 'HH:mm', { locale: pt })}
@@ -117,13 +116,24 @@ function isLightColor(hex: string): boolean {
 function getBorderRadius(setting: WidgetBranding['borderRadius']): { base: string; message: string } {
   switch (setting) {
     case 'normal':
-      return { base: '4px', message: '8px' };
+      return { base: '8px', message: '8px' };
     case 'rounded':
-      return { base: '8px', message: '12px' };
+      return { base: '16px', message: '16px' };
     case 'soft':
-      return { base: '16px', message: '20px' };
+      return { base: '24px', message: '24px' };
     default:
-      return { base: '4px', message: '8px' };
+      return { base: '8px', message: '8px' };
+  }
+}
+
+function getContentMaxWidth(size?: WidgetBranding['size']): string {
+  switch (size) {
+    case 'small':
+      return '320px';
+    case 'large':
+      return '420px';
+    default:
+      return '380px';
   }
 }
 
@@ -170,9 +180,14 @@ export default function PublicChatPage() {
     return {
       '--widget-primary': branding.primaryColor,
       '--widget-secondary': branding.secondaryColor,
-      '--widget-background': isDark ? '#1f2937' : branding.backgroundColor,
+      '--widget-background': branding.backgroundColor,
       '--widget-user-message': branding.userMessageColor,
-      '--widget-agent-message': isDark ? '#374151' : branding.agentMessageColor,
+      '--widget-agent-message': branding.agentMessageColor,
+      '--widget-user-text': branding.userTextColor,
+      '--widget-agent-text': branding.agentTextColor,
+      '--widget-input-background': branding.inputBackgroundColor,
+      '--widget-input-text': branding.inputTextColor,
+      '--widget-button': branding.buttonColor,
       '--widget-border-radius': radii.base,
       '--widget-message-radius': radii.message,
       '--widget-text-primary': isDark ? '#f9fafb' : '#111827',
@@ -255,7 +270,10 @@ export default function PublicChatPage() {
 
   // Determine text colors based on background
   const primaryTextColor = branding && isLightColor(branding.primaryColor) ? '#111827' : '#ffffff';
-  const userMessageTextColor = branding && isLightColor(branding.userMessageColor) ? '#111827' : '#ffffff';
+  const buttonTextColor = branding && isLightColor(branding.buttonColor) ? '#111827' : '#ffffff';
+  const contentShellStyle = !isEmbedded
+    ? { maxWidth: getContentMaxWidth(branding?.size), marginLeft: 'auto', marginRight: 'auto' }
+    : undefined;
 
   return (
     <div 
@@ -271,10 +289,10 @@ export default function PublicChatPage() {
         className="px-4 py-3 flex-shrink-0"
         style={{ 
           backgroundColor: isInitialLoading ? 'hsl(var(--primary))' : (branding?.primaryColor || 'var(--primary)'),
-          borderBottom: `1px solid ${isInitialLoading ? 'hsl(var(--primary))' : (branding?.primaryColor || 'var(--border)')}`,
+          borderBottom: `1px solid ${isInitialLoading ? 'hsl(var(--primary))' : (branding?.secondaryColor || branding?.primaryColor || 'var(--border)')}`,
         }}
       >
-        <div className={cn("flex items-center gap-3", !isEmbedded && "max-w-2xl mx-auto")}>
+        <div className="flex items-center gap-3" style={contentShellStyle}>
           {isInitialLoading ? (
             <>
               <Skeleton className="h-10 w-10 rounded-full bg-white/20" />
@@ -336,7 +354,7 @@ export default function PublicChatPage() {
 
       {/* Messages */}
       <ScrollArea className="flex-1 px-4 min-h-0">
-        <div className={cn("py-4 space-y-4", !isEmbedded && "max-w-2xl mx-auto")}>
+        <div className="py-4 space-y-4" style={contentShellStyle}>
           {isInitialLoading || messagesLoading ? (
             <>
               <div className="flex gap-2 justify-start">
@@ -364,7 +382,6 @@ export default function PublicChatPage() {
                   key={message.id}
                   message={message}
                   branding={branding}
-                  userMessageTextColor={userMessageTextColor}
                   isSending={message.id.startsWith('temp_') && chatState === 'client_sending'}
                 />
               ))}
@@ -390,7 +407,7 @@ export default function PublicChatPage() {
           borderTop: `1px solid var(--widget-border, var(--border))`,
         }}
       >
-        <div className={cn("flex gap-2", !isEmbedded && "max-w-2xl mx-auto")}>
+        <div className="flex gap-2" style={contentShellStyle}>
           {isInitialLoading ? (
             <>
               <Skeleton className="flex-1 h-11 rounded" />
@@ -418,8 +435,8 @@ export default function PublicChatPage() {
                 size="icon"
                 className="h-11 w-11 flex-shrink-0"
                 style={{ 
-                  backgroundColor: branding?.primaryColor || 'var(--primary)',
-                  color: primaryTextColor,
+                  backgroundColor: branding?.buttonColor || 'var(--primary)',
+                  color: buttonTextColor,
                   borderRadius: 'var(--widget-border-radius, 4px)',
                 }}
               >
