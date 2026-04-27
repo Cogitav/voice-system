@@ -555,17 +555,13 @@ function buildServicePriceAnswer(
   return null;
 }
 
-function shouldRequireReasonForRuntime(bookingConfig: Record<string, unknown> | null | undefined): boolean {
-  // Legacy booking_configuration.require_reason was created with a default true, so it is not a safe opt-in signal.
-  // Phase 1 keeps reason optional until explicit triage/service metadata exists.
-  return bookingConfig?.require_reason_explicit === true;
-}
-
-function serviceRequiresReason(service: SchedulingService | null): boolean {
-  if (!service) return false;
-  if (service.requires_triage === true) return true;
-  const category = normalizeComparable(service.category);
-  return /\b(triage|triagem)\b/.test(category);
+function shouldRequireReasonForRuntime(
+  service: SchedulingService | null,
+  bookingConfig: { require_reason?: boolean | null } | null | undefined,
+): boolean {
+  const serviceRequiresReason = (service as { requires_reason?: boolean | null } | null)?.requires_reason;
+  return serviceRequiresReason === true ||
+    (serviceRequiresReason == null && bookingConfig?.require_reason === true);
 }
 
 function hasSoftServiceSignal(extraction: LLMExtraction): boolean {
@@ -1038,8 +1034,7 @@ serve(async (req) => {
       .maybeSingle();
 
     const requirePhone = true;
-    const companyRequiresReason = shouldRequireReasonForRuntime(bookingConfig as Record<string, unknown> | null);
-    let requireReason = companyRequiresReason;
+    let requireReason = shouldRequireReasonForRuntime(null, bookingConfig);
 
     const agentId = agent?.id ?? '';
     const agentPrompt = `${agent?.prompt_base ?? ''}\n${agent?.regras ?? ''}`.trim();
@@ -1353,7 +1348,7 @@ serve(async (req) => {
 
     if (updatedContext.service_id) {
       const currentService = findServiceById(await getServices(), updatedContext.service_id);
-      requireReason = companyRequiresReason || serviceRequiresReason(currentService);
+      requireReason = shouldRequireReasonForRuntime(currentService, bookingConfig);
     }
 
     const explicitServiceChange = isExplicitServiceChangeRequest(extraction, userMessage);
@@ -1398,8 +1393,10 @@ serve(async (req) => {
         };
         intent = extraction.intent;
         serviceChangedThisTurn = true;
-        requireReason = companyRequiresReason ||
-          serviceRequiresReason(findServiceById(services, serviceResult.service_id));
+        requireReason = shouldRequireReasonForRuntime(
+          findServiceById(services, serviceResult.service_id),
+          bookingConfig,
+        );
 
         logFlow('[FLOW_SERVICE_CHANGE]', {
           conversation_id: conversationId,
@@ -1531,7 +1528,7 @@ serve(async (req) => {
           intent: 'BOOKING_NEW',
         };
         intent = extraction.intent;
-        requireReason = companyRequiresReason || serviceRequiresReason(numericService);
+        requireReason = shouldRequireReasonForRuntime(numericService, bookingConfig);
 
         logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
           previous_service_id: previousServiceId,
@@ -1588,7 +1585,7 @@ serve(async (req) => {
           service_source: 'menu_numeric_selection',
           service_locked: true,
         }, updatedContext.context_version);
-        requireReason = companyRequiresReason || serviceRequiresReason(numericService);
+        requireReason = shouldRequireReasonForRuntime(numericService, bookingConfig);
 
         logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
           previous_service_id: previousServiceId,
@@ -1635,8 +1632,10 @@ serve(async (req) => {
         });
 
         if (serviceResult?.service_id) {
-          requireReason = companyRequiresReason ||
-            serviceRequiresReason(findServiceById(services, serviceResult.service_id));
+          requireReason = shouldRequireReasonForRuntime(
+            findServiceById(services, serviceResult.service_id),
+            bookingConfig,
+          );
 
           updatedContext = await updateContext(conversationId, {
             service_id: serviceResult.service_id,
