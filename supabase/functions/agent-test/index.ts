@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildAgentSystemPrompt } from "../_shared/agent-prompt-builder.ts";
+import { callLLM } from "../_shared/llm-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,6 +15,7 @@ interface AgentConfig {
   contexto_negocio: string | null;
   prompt_base: string | null;
   regras: string | null;
+  response_style: string | null;
   empresa_id: string;
 }
 
@@ -26,6 +29,33 @@ interface KnowledgeItem {
 interface Message {
   role: "user" | "assistant";
   content: string;
+}
+
+function buildTranscript(messages: Message[]): string {
+  return messages
+    .map((message) => {
+      const speaker = message.role === "assistant" ? "Assistente" : "Cliente";
+      return `${speaker}: ${message.content}`;
+    })
+    .join("\n");
+}
+
+function createOpenAICompatibleStream(content: string): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      const payload = {
+        choices: [
+          {
+            delta: { content },
+          },
+        ],
+      };
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
 }
 
 // Credit rules - keep in sync with src/lib/credits.ts
@@ -144,57 +174,6 @@ async function registerCreditUsage(
   }
 }
 
-function buildSystemPrompt(agent: AgentConfig, knowledge: KnowledgeItem[]): string {
-  const parts: string[] = [];
-
-  // 1. Agent identity and role
-  parts.push(`Você é ${agent.nome}, um agente de IA de voz.`);
-  
-  if (agent.idioma) {
-    parts.push(`Idioma principal: ${agent.idioma}`);
-  }
-
-  // 2. Job description
-  if (agent.descricao_funcao) {
-    parts.push(`\n## Descrição da Função\n${agent.descricao_funcao}`);
-  }
-
-  // 3. Business context
-  if (agent.contexto_negocio) {
-    parts.push(`\n## Contexto de Negócio\n${agent.contexto_negocio}`);
-  }
-
-  // 4. Core behavior (system prompt)
-  if (agent.prompt_base) {
-    parts.push(`\n## Instruções de Comportamento\n${agent.prompt_base}`);
-  }
-
-  // 5. Rules and restrictions
-  if (agent.regras) {
-    parts.push(`\n## Regras e Restrições\n${agent.regras}`);
-  }
-
-  // 6. Knowledge base
-  if (knowledge.length > 0) {
-    parts.push(`\n## Base de Conhecimento\nUtilize as seguintes informações para responder com precisão:`);
-    
-    knowledge.forEach((item, index) => {
-      parts.push(`\n### ${index + 1}. ${item.title} (${item.type})`);
-      if (item.content) {
-        parts.push(item.content);
-      }
-      if (item.source_url) {
-        parts.push(`Fonte: ${item.source_url}`);
-      }
-    });
-  }
-
-  // 7. Simulation context
-  parts.push(`\n## Contexto de Simulação\nEsta é uma simulação de teste. Responda como se estivesse numa chamada telefónica real com um cliente.\nSeja natural, profissional e siga todas as regras definidas.\nMantenha as respostas concisas e adequadas para comunicação por voz.`);
-
-  return parts.join("\n");
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -217,15 +196,10 @@ serve(async (req) => {
       });
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
-    }
-
     // Fetch agent configuration
     const { data: agent, error: agentError } = await supabase
       .from("agentes")
-      .select("nome, idioma, descricao_funcao, contexto_negocio, prompt_base, regras, empresa_id")
+      .select("nome, idioma, descricao_funcao, contexto_negocio, prompt_base, regras, response_style, empresa_id")
       .eq("id", agentId)
       .single();
 
@@ -248,45 +222,21 @@ serve(async (req) => {
       console.error("Error fetching knowledge:", knowledgeError);
     }
 
-    const systemPrompt = buildSystemPrompt(agent as AgentConfig, knowledge || []);
-
-    // Call Lovable AI Gateway with streaming
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
+    const systemPrompt = buildAgentSystemPrompt({
+      agent: agent as AgentConfig,
+      mode: {
+        kind: "test",
+        knowledge: knowledge || [],
       },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages,
-        ],
-        stream: true,
-      }),
     });
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Payment required. Please add credits to your workspace." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
-      return new Response(JSON.stringify({ error: "AI gateway error" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const llmResponse = await callLLM({
+      system_prompt: systemPrompt,
+      user_message: buildTranscript(messages),
+      response_format: "text",
+      temperature: 0.3,
+      max_tokens: 1000,
+    }, agent.empresa_id);
 
     // Register credit usage AFTER successful AI response (non-blocking)
     // Use a unique reference to ensure idempotency
@@ -301,8 +251,8 @@ serve(async (req) => {
       { agentId, messageCount }
     );
 
-    // Return streaming response
-    return new Response(response.body, {
+    // Return an OpenAI-compatible SSE envelope because the admin test UI consumes delta chunks.
+    return new Response(createOpenAICompatibleStream(llmResponse.content), {
       headers: { 
         ...corsHeaders, 
         "Content-Type": "text/event-stream",

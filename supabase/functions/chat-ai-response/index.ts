@@ -184,8 +184,20 @@ function buildAgentCtx(agent: any, empresa: any, agentPrompt: string): any {
     agent_prompt: agentPrompt,
     agent_style: agent?.response_style ?? 'friendly',
     empresa_name: empresa?.nome ?? '',
+    agent: {
+      nome: agent?.nome ?? 'Assistente',
+      idioma: agent?.idioma ?? null,
+      descricao_funcao: agent?.descricao_funcao ?? null,
+      contexto_negocio: agent?.contexto_negocio ?? null,
+      prompt_base: agent?.prompt_base ?? null,
+      regras: agent?.regras ?? null,
+      response_style: agent?.response_style ?? null,
+    },
+    empresa: {
+      nome: empresa?.nome ?? null,
+    },
     empresa_sector: '',
-    language: 'pt-PT',
+    language: agent?.idioma ?? 'pt-PT',
   };
 }
 
@@ -1013,7 +1025,7 @@ serve(async (req) => {
 
     const { data: agent } = await db
       .from('agentes')
-      .select('id, nome, prompt_base, regras, welcome_message, response_delay_ms, response_style')
+      .select('id, nome, idioma, descricao_funcao, contexto_negocio, prompt_base, regras, welcome_message, response_delay_ms, response_style')
       .eq('empresa_id', empresaId)
       .eq('is_default_chat_agent', true)
       .eq('status', 'ativo')

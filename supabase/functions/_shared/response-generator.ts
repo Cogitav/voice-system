@@ -1,11 +1,14 @@
 import { ConversationContext, SlotSuggestion } from './types.ts';
 import { callLLMSimple } from './llm-provider.ts';
+import { AgentPromptBuilderAgent, AgentPromptBuilderEmpresa, buildAgentSystemPrompt } from './agent-prompt-builder.ts';
 
 interface ResponseContext {
   agent_name: string;
   agent_prompt: string;
   empresa_name: string;
   language: string;
+  agent?: AgentPromptBuilderAgent;
+  empresa?: AgentPromptBuilderEmpresa;
 }
 
 export async function generateResponse(
@@ -16,39 +19,26 @@ export async function generateResponse(
   agentCtx: ResponseContext,
   empresaId: string
 ): Promise<string> {
-  const slotList = slots && slots.length > 0
-    ? slots.map((s, i) => `${i + 1}. ${s.display_label}`).join('\n')
-    : null;
-
-  const systemPrompt = `${agentCtx.agent_prompt}
-
-Empresa: ${agentCtx.empresa_name}
-Idioma: português europeu (pt-PT)
-Tom: profissional mas acessível
-
-Estado atual da conversa: ${context.state}
-Intenção do utilizador: ${context.current_intent ?? 'desconhecida'}
-
-Dados já recolhidos:
-- Nome: ${context.customer_name ?? 'não fornecido'}
-- Email: ${context.customer_email ?? 'não fornecido'}
-- Telefone: ${context.customer_phone ?? 'não fornecido'}
-- Serviço: ${context.service_name ?? 'não definido'}
-- Data preferida: ${context.preferred_date ?? 'não definida'}
-
-Instrução para esta resposta: ${responseHint}
-${slotList ? `\nHorários disponíveis para apresentar:\n${slotList}` : ''}
-
-Regras obrigatórias:
-- Responde SEMPRE em português europeu (pt-PT)
-- Sê direto e claro — sem introduções longas
-- Se tens horários para mostrar, apresenta-os numerados tal como te foram fornecidos
-- Nunca confirmes um agendamento sem o sistema ter confirmado o sucesso
-- Nunca inventes informação
-- Máximo 3 frases, exceto quando apresentas horários`;
-
   try {
-    return await callLLMSimple(systemPrompt, userMessage, empresaId, 'text');
+    return await callLLMSimple(
+      buildAgentSystemPrompt({
+        agent: agentCtx.agent ?? {
+          nome: agentCtx.agent_name,
+          prompt_base: agentCtx.agent_prompt,
+          idioma: agentCtx.language,
+        },
+        empresa: agentCtx.empresa ?? { nome: agentCtx.empresa_name },
+        mode: {
+          kind: 'chat',
+          context,
+          responseHint,
+          slots,
+        },
+      }),
+      userMessage,
+      empresaId,
+      'text',
+    );
   } catch {
     return getFallbackResponse(context.state, responseHint);
   }
