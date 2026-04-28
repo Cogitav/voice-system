@@ -6,7 +6,7 @@ interface ServiceResolveResult {
   service_id: string | null;
   service_name: string | null;
   confidence: number;
-  method: 'deterministic' | 'llm';
+  method: 'deterministic' | 'llm' | 'fallback';
 }
 
 const AUTO_SELECT_CONFIDENCE_THRESHOLD = 0.8;
@@ -90,6 +90,58 @@ function tryDeterministic(message: string, services: SchedulingService[]): Servi
   return best;
 }
 
+async function getFallbackService(
+  empresaId: string,
+  services: SchedulingService[]
+): Promise<ServiceResolveResult | null> {
+  const db = getServiceClient();
+  const { data: bookingConfig, error: configError } = await db
+    .from('booking_configuration')
+    .select('fallback_service_id')
+    .eq('empresa_id', empresaId)
+    .maybeSingle();
+
+  if (configError || !bookingConfig?.fallback_service_id) return null;
+
+  let fallbackService = services.find((service) => service.id === bookingConfig.fallback_service_id) ?? null;
+
+  if (!fallbackService) {
+    const { data: service, error: serviceError } = await db
+      .from('scheduling_services')
+      .select('*')
+      .eq('id', bookingConfig.fallback_service_id)
+      .eq('empresa_id', empresaId)
+      .eq('status', 'active')
+      .eq('bookable', true)
+      .maybeSingle();
+
+    if (serviceError || !service) return null;
+    fallbackService = service as SchedulingService;
+  }
+
+  return {
+    service_id: fallbackService.id,
+    service_name: fallbackService.name,
+    confidence: 0.5,
+    method: 'fallback',
+  };
+}
+
+async function unresolvedResult(
+  empresaId: string,
+  services: SchedulingService[],
+  confidence: number,
+  method: 'deterministic' | 'llm'
+): Promise<ServiceResolveResult> {
+  const fallback = await getFallbackService(empresaId, services);
+  return fallback ?? {
+    service_id: null,
+    service_name: null,
+    confidence,
+    method,
+  };
+}
+
 export async function resolveService(
   message: string,
   empresaId: string,
@@ -98,7 +150,7 @@ export async function resolveService(
   const available = services ?? await loadServices(empresaId);
 
   if (available.length === 0) {
-    return { service_id: null, service_name: null, confidence: 0, method: 'deterministic' };
+    return await unresolvedResult(empresaId, available, 0, 'deterministic');
   }
 
   if (available.length === 1) {
@@ -111,12 +163,7 @@ export async function resolveService(
       return deterministic;
     }
 
-    return {
-      service_id: null,
-      service_name: null,
-      confidence: deterministic.confidence,
-      method: deterministic.method,
-    };
+    return await unresolvedResult(empresaId, available, deterministic.confidence, 'deterministic');
   }
 
   try {
@@ -142,12 +189,7 @@ Regras:
     const parsedConfidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
 
     if (parsed.service_index !== null && parsedConfidence < AUTO_SELECT_CONFIDENCE_THRESHOLD) {
-      return {
-        service_id: null,
-        service_name: null,
-        confidence: parsedConfidence,
-        method: 'llm',
-      };
+      return await unresolvedResult(empresaId, available, parsedConfidence, 'llm');
     }
 
     if (parsed.service_index !== null && parsedConfidence >= AUTO_SELECT_CONFIDENCE_THRESHOLD) {
@@ -165,5 +207,5 @@ Regras:
     // LLM failed
   }
 
-  return { service_id: null, service_name: null, confidence: 0, method: 'llm' };
+  return await unresolvedResult(empresaId, available, 0, 'llm');
 }

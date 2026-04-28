@@ -122,16 +122,34 @@ async function checkAndNotifyThresholds(empresaId: string, month: string): Promi
 
     if (existing) return;
 
-    // Register notification (email sending handled by send-credit-alert-email function)
-    await db.from('credit_notifications').insert({
+    // Register notification first; trigger the email only after DB insert succeeds.
+    const { error: insertError } = await db.from('credit_notifications').insert({
       empresa_id: empresaId,
       notification_type: threshold_type,
       threshold_percentage: Math.round(ratio * 100),
       month,
-      credits_used: data.credits_used,
-      limit_at_notification: total,
+      credits_used_at_notification: data.credits_used,
+      credits_limit_at_notification: total,
     });
-  } catch {
+
+    if (insertError) {
+      console.error('CREDIT_NOTIFICATION_FAILED', insertError);
+      return;
+    }
+
+    try {
+      const { error: invokeError } = await db.functions.invoke('send-credit-alert-email', {
+        body: { empresa_id: empresaId, alert_type: threshold_type },
+      });
+
+      if (invokeError) {
+        console.error('CREDIT_NOTIFICATION_EMAIL_FAILED', invokeError);
+      }
+    } catch (error) {
+      console.error('CREDIT_NOTIFICATION_EMAIL_FAILED', error);
+    }
+  } catch (error) {
     // Never throw from threshold check
+    console.error('CREDIT_NOTIFICATION_FAILED', error);
   }
 }

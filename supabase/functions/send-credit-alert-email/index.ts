@@ -8,18 +8,29 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-type AlertType = 'credits_70' | 'credits_85' | 'credits_100';
+type AlertType = 'soft' | 'warning' | 'critical';
+
+const ALERT_TYPES: AlertType[] = ['soft', 'warning', 'critical'];
 
 interface CreditAlertRequest {
   empresa_id: string;
   alert_type: AlertType;
+  empresa_nome?: string;
+  empresa_email?: string | null;
+  admin_email?: string | null;
+  credits_used?: number;
+  credits_limit?: number;
+  percentage?: number;
+  is_test_environment?: boolean;
+}
+
+interface ResolvedCreditAlertData {
   empresa_nome: string;
   empresa_email: string | null;
   admin_email: string;
   credits_used: number;
   credits_limit: number;
   percentage: number;
-  is_test_environment?: boolean;
 }
 
 interface EmailTemplate {
@@ -37,6 +48,8 @@ interface GlobalSettings {
   platform_logo_url?: string;
   platform_footer_text?: string;
   platform_signature?: string;
+  admin_notification_email?: string;
+  default_company_email?: string;
 }
 
 /**
@@ -75,6 +88,8 @@ async function getGlobalSettings(supabase: any): Promise<GlobalSettings> {
       'platform_logo_url',
       'platform_footer_text',
       'platform_signature',
+      'admin_notification_email',
+      'default_company_email',
     ]);
 
   if (error) {
@@ -131,7 +146,7 @@ function getFallbackTemplate(
   const footer = settings.platform_footer_text || 'Notificação automática de sistema';
 
   const templates: Record<AlertType, { subject: string; body: string }> = {
-    credits_70: {
+    soft: {
       subject: `Utilização de créditos a ${percentage}%`,
       body: `Olá ${empresaNome},
 
@@ -143,7 +158,7 @@ Este aviso serve apenas para acompanhamento do consumo.
 ${signature}
 ${footer}`,
     },
-    credits_85: {
+    warning: {
       subject: `Atenção à utilização de créditos (${percentage}%)`,
       body: `Olá ${empresaNome},
 
@@ -154,7 +169,7 @@ Recomendamos acompanhar o consumo para evitar excedentes.
 ${signature}
 ${footer}`,
     },
-    credits_100: {
+    critical: {
       subject: `Limite de créditos ultrapassado (${percentage}%)`,
       body: `Olá ${empresaNome},
 
@@ -225,6 +240,101 @@ function getCurrentMonth(): string {
   return `${year}-${month}`;
 }
 
+function isAlertType(value: unknown): value is AlertType {
+  return typeof value === 'string' && ALERT_TYPES.includes(value as AlertType);
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+async function resolveAlertData(
+  supabase: any,
+  request: CreditAlertRequest,
+  currentMonth: string,
+  globalSettings: GlobalSettings
+): Promise<{ data: ResolvedCreditAlertData | null; error: string | null }> {
+  const { data: empresa, error: empresaError } = await supabase
+    .from('empresas')
+    .select('nome, email')
+    .eq('id', request.empresa_id)
+    .maybeSingle();
+
+  if (empresaError) {
+    console.error('[CreditAlert] Error fetching empresa:', empresaError);
+  }
+
+  const { data: notification, error: notificationError } = await supabase
+    .from('credit_notifications')
+    .select('threshold_percentage, credits_used_at_notification, credits_limit_at_notification')
+    .eq('empresa_id', request.empresa_id)
+    .eq('notification_type', request.alert_type)
+    .eq('month', currentMonth)
+    .maybeSingle();
+
+  if (notificationError) {
+    console.error('[CreditAlert] Error fetching credit notification:', notificationError);
+  }
+
+  const needsUsageFallback =
+    numberOrNull(request.credits_used) === null ||
+    numberOrNull(request.credits_limit) === null ||
+    numberOrNull(request.percentage) === null;
+
+  let usage: { credits_used?: number; credits_limit?: number; extra_credits?: number } | null = null;
+  if (needsUsageFallback) {
+    const { data: usageData, error: usageError } = await supabase
+      .from('credits_usage')
+      .select('credits_used, credits_limit, extra_credits')
+      .eq('empresa_id', request.empresa_id)
+      .eq('month', currentMonth)
+      .maybeSingle();
+
+    if (usageError) {
+      console.error('[CreditAlert] Error fetching credit usage:', usageError);
+    }
+    usage = usageData;
+  }
+
+  const usageLimit =
+    (usage?.credits_limit ?? 1000) + (usage?.extra_credits ?? 0);
+  const creditsLimit =
+    numberOrNull(request.credits_limit) ??
+    numberOrNull(notification?.credits_limit_at_notification) ??
+    usageLimit;
+  const creditsUsed =
+    numberOrNull(request.credits_used) ??
+    numberOrNull(notification?.credits_used_at_notification) ??
+    numberOrNull(usage?.credits_used) ??
+    0;
+  const percentage =
+    numberOrNull(request.percentage) ??
+    numberOrNull(notification?.threshold_percentage) ??
+    (creditsLimit > 0 ? Math.round((creditsUsed / creditsLimit) * 100) : 0);
+
+  const adminEmail =
+    request.admin_email ||
+    globalSettings.admin_notification_email ||
+    Deno.env.get('ADMIN_NOTIFICATION_EMAIL') ||
+    null;
+
+  if (!adminEmail) {
+    return { data: null, error: 'Missing admin notification email' };
+  }
+
+  return {
+    data: {
+      empresa_nome: request.empresa_nome || empresa?.nome || 'Empresa',
+      empresa_email: request.empresa_email ?? empresa?.email ?? globalSettings.default_company_email ?? null,
+      admin_email: adminEmail,
+      credits_used: creditsUsed,
+      credits_limit: creditsLimit,
+      percentage,
+    },
+    error: null,
+  };
+}
+
 const handler = async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -239,21 +349,15 @@ const handler = async (req: Request): Promise<Response> => {
     const {
       empresa_id,
       alert_type,
-      empresa_nome,
-      empresa_email,
-      admin_email,
-      credits_used,
-      credits_limit,
-      percentage,
       is_test_environment = false,
     } = request;
 
     console.log(`[CreditAlert] Processing ${alert_type} for empresa ${empresa_id}${is_test_environment ? ' (TEST ENV)' : ''}`);
 
     // Validate required fields
-    if (!empresa_id || !alert_type || !admin_email) {
+    if (!empresa_id || !isAlertType(alert_type)) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: empresa_id, alert_type, admin_email' }),
+        JSON.stringify({ error: 'Missing or invalid required fields: empresa_id, alert_type' }),
         { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
@@ -262,6 +366,24 @@ const handler = async (req: Request): Promise<Response> => {
 
     // Fetch global settings for branding
     const globalSettings = await getGlobalSettings(supabase);
+    const resolved = await resolveAlertData(supabase, request, currentMonth, globalSettings);
+
+    if (!resolved.data) {
+      return new Response(
+        JSON.stringify({ success: false, error: resolved.error }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const {
+      empresa_nome,
+      empresa_email,
+      admin_email,
+      credits_used,
+      credits_limit,
+      percentage,
+    } = resolved.data;
+
     const senderName = globalSettings.email_sender_name || 'AI Call Platform';
     const senderEmail = globalSettings.email_sender_address || 'onboarding@resend.dev';
 
@@ -320,13 +442,13 @@ const handler = async (req: Request): Promise<Response> => {
     const recipients = new Set<string>([admin_email]);
 
     // For 85% and 100% alerts, also notify company contact
-    if ((alert_type === 'credits_85' || alert_type === 'credits_100') && empresa_email) {
+    if ((alert_type === 'warning' || alert_type === 'critical') && empresa_email) {
       recipients.add(empresa_email);
     }
 
     const recipientList = Array.from(recipients);
 
-    if ((alert_type === 'credits_85' || alert_type === 'credits_100') && !empresa_email) {
+    if ((alert_type === 'warning' || alert_type === 'critical') && !empresa_email) {
       console.warn(`[CreditAlert] Warning: No empresa email for ${empresa_id} - only admin will be notified`);
     }
 

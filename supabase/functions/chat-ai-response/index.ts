@@ -1033,7 +1033,7 @@ serve(async (req) => {
       .eq('empresa_id', empresaId)
       .maybeSingle();
 
-    const requirePhone = true;
+    const requirePhone = bookingConfig?.require_phone === true;
     let requireReason = shouldRequireReasonForRuntime(null, bookingConfig);
 
     const agentId = agent?.id ?? '';
