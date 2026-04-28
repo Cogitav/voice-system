@@ -1021,7 +1021,7 @@ serve(async (req) => {
 
     const { data: agent } = await db
       .from('agentes')
-      .select('id, nome, idioma, descricao_funcao, contexto_negocio, prompt_base, regras, welcome_message, response_delay_ms, response_style')
+      .select('id, nome, idioma, descricao_funcao, contexto_negocio, prompt_base, regras, response_delay_ms, response_style')
       .eq('empresa_id', empresaId)
       .eq('is_default_chat_agent', true)
       .eq('status', 'ativo')

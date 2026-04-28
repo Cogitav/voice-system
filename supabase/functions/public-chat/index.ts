@@ -160,7 +160,7 @@ serve(async (req) => {
         .order('priority', { ascending: true })
         .limit(8);
 
-      const baseMessage = agent?.welcome_message ?? agent?.initial_greeting ?? 'Olá! Como posso ajudar?';
+      const baseMessage = agent?.initial_greeting ?? agent?.welcome_message ?? 'Olá! Como posso ajudar?';
 
       let welcomeMessage = baseMessage;
       if (menuServices && menuServices.length > 0) {

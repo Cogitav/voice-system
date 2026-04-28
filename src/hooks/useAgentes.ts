@@ -31,7 +31,6 @@ export interface AgenteFormData {
   regras?: string;
   status?: string;
   is_default_chat_agent?: boolean;
-  welcome_message?: string;
   response_delay_ms?: number;
   initial_greeting?: string;
   response_style?: string;
@@ -149,7 +148,6 @@ export function useCreateAgente() {
           regras: data.regras || null,
           status: data.status || 'ativo',
           is_default_chat_agent: data.is_default_chat_agent ?? false,
-          welcome_message: data.welcome_message || null,
           response_delay_ms: data.response_delay_ms ?? null,
           initial_greeting: data.initial_greeting || null,
           response_style: data.response_style || 'neutral',
@@ -190,7 +188,6 @@ export function useUpdateAgente() {
           regras: data.regras || null,
           status: data.status,
           is_default_chat_agent: data.is_default_chat_agent,
-          welcome_message: data.welcome_message || null,
           response_delay_ms: data.response_delay_ms ?? null,
           initial_greeting: data.initial_greeting || null,
           response_style: data.response_style || 'neutral',

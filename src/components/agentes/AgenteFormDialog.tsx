@@ -46,7 +46,6 @@ const agenteSchema = z.object({
   regras: z.string().max(2000, 'Regras muito longas').optional().or(z.literal('')),
   status: z.enum(['ativo', 'inativo']).default('ativo'),
   is_default_chat_agent: z.boolean().default(false),
-  welcome_message: z.string().max(500, 'Mensagem muito longa').optional().or(z.literal('')),
   response_delay_ms: z.number().int().min(0).max(10000).optional(),
   initial_greeting: z.string().max(1000, 'Mensagem muito longa').optional().or(z.literal('')),
   response_style: z.enum(['formal', 'neutral', 'friendly', 'energetic']).default('neutral'),
@@ -118,7 +117,6 @@ export function AgenteFormDialog({
       regras: '',
       status: 'ativo',
       is_default_chat_agent: false,
-      welcome_message: '',
       response_delay_ms: undefined,
       initial_greeting: '',
       response_style: 'neutral',
@@ -137,7 +135,6 @@ export function AgenteFormDialog({
         regras: agente.regras || '',
         status: agente.status as 'ativo' | 'inativo',
         is_default_chat_agent: agente.is_default_chat_agent ?? false,
-        welcome_message: agente.welcome_message || '',
         response_delay_ms: agente.response_delay_ms ?? undefined,
         initial_greeting: agente.initial_greeting || '',
         response_style: (agente.response_style as 'formal' | 'neutral' | 'friendly' | 'energetic') || 'neutral',
@@ -153,7 +150,6 @@ export function AgenteFormDialog({
         regras: '',
         status: 'ativo',
         is_default_chat_agent: false,
-        welcome_message: '',
         response_delay_ms: undefined,
         initial_greeting: '',
         response_style: 'neutral',
@@ -172,7 +168,6 @@ export function AgenteFormDialog({
       regras: values.regras || undefined,
       status: values.status,
       is_default_chat_agent: values.is_default_chat_agent,
-      welcome_message: values.welcome_message || undefined,
       response_delay_ms: values.response_delay_ms ?? undefined,
       initial_greeting: values.initial_greeting || undefined,
       response_style: values.response_style,
@@ -418,28 +413,6 @@ export function AgenteFormDialog({
                         onCheckedChange={field.onChange}
                       />
                     </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="welcome_message"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Mensagem de Boas-Vindas</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Ex: Olá! 👋 Sou o assistente virtual. Como posso ajudá-lo hoje?"
-                        className="min-h-[80px]"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      Mensagem exibida automaticamente quando uma nova conversa começa. 
-                      Se vazio, será usada a mensagem padrão da empresa ou da plataforma.
-                    </FormDescription>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
