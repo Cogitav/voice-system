@@ -71,7 +71,8 @@ export async function executeBooking(
   context: ConversationContext,
   empresaId: string,
   agentId: string,
-  conversationId: string
+  conversationId: string,
+  timezone: string
 ): Promise<BookingResult> {
   const guard = guardBookingExecution(context);
   if (!guard.allowed) {
@@ -128,7 +129,7 @@ export async function executeBooking(
     start: slot.start,
     end: slot.end,
     resource_id: slot.resource_id ?? null,
-    timezone: 'Europe/Lisbon',
+    timezone,
     query_filters: bookingQueryFilters,
     conflict_scope: 'resource_id',
     blocks_booking: overlappingConflictRows.length > 0,
@@ -176,7 +177,7 @@ export async function executeBooking(
     empresa_id: empresaId,
     service_id: context.service_id!,
     date: slot.start.slice(0, 10),
-    timezone: 'Europe/Lisbon',
+    timezone,
     preferred_time: slotTime,
   });
 
@@ -190,7 +191,7 @@ export async function executeBooking(
     start: slot.start,
     end: slot.end,
     resource_id: slot.resource_id ?? null,
-    timezone: 'Europe/Lisbon',
+    timezone,
     query_filters: bookingQueryFilters,
     conflict_scope: 'resource_id',
     blocks_booking: overlappingConflictRows.length > 0,
@@ -228,8 +229,8 @@ export async function executeBooking(
     .single();
 
   const startDate = new Date(slot.start);
-  const dataStr = slot.start.slice(0, 10) || startDate.toLocaleDateString('en-CA', { timeZone: 'Europe/Lisbon' });
-  const horaStr = slotTime ? `${slotTime}:00` : startDate.toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit', minute: '2-digit' });
+  const dataStr = slot.start.slice(0, 10) || startDate.toLocaleDateString('en-CA', { timeZone: timezone });
+  const horaStr = slotTime ? `${slotTime}:00` : startDate.toLocaleTimeString('pt-PT', { timeZone: timezone, hour: '2-digit', minute: '2-digit' });
 
   console.log('[FLOW_DEBUG_BOOKING_PERSISTENCE]', JSON.stringify({
     selected_slot_start: slot.start,
@@ -237,7 +238,7 @@ export async function executeBooking(
     persisted_start_datetime: slot.start,
     persisted_end_datetime: slot.end,
     persisted_hora: horaStr,
-    timezone_used: 'Europe/Lisbon',
+    timezone_used: timezone,
   }));
 
   // Upsert customer

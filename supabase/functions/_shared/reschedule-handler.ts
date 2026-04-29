@@ -9,7 +9,8 @@ export async function executeReschedule(
   context: ConversationContext,
   empresaId: string,
   agentId: string,
-  conversationId: string
+  conversationId: string,
+  timezone: string
 ): Promise<BookingResult> {
   const guard = guardReschedule(context);
   if (!guard.allowed) {
@@ -40,7 +41,7 @@ export async function executeReschedule(
     empresa_id: empresaId,
     service_id: context.service_id ?? existing.service_id,
     date: newSlot.start.slice(0, 10),
-    timezone: 'Europe/Lisbon',
+    timezone,
     preferred_time: requestedTime,
     exclude_booking_id: appointmentId,
   });

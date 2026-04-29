@@ -42,8 +42,9 @@ function getPersonalFieldsGroup(missing: string[]): string[] {
 export async function orchestrateBooking(
   context: ConversationContext,
   empresaId: string,
-  requirePhone: boolean = false,
-  requireReason: boolean = false
+  requirePhone: boolean,
+  requireReason: boolean,
+  timezone: string
 ): Promise<OrchestratorResult> {
 
   const missing = getMissingFields(context, requirePhone, requireReason);
@@ -81,8 +82,8 @@ export async function orchestrateBooking(
 
     // Only date missing — proactively suggest next available slots
     if (missing.includes('preferred_date') && context.service_id) {
-      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Lisbon' });
-      const nextDays = await findNextAvailableDays(empresaId, context.service_id, today, 'Europe/Lisbon', 3);
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+      const nextDays = await findNextAvailableDays(empresaId, context.service_id, today, timezone, 3);
       const proactiveSlots = nextDays.flatMap(d => d.slots.slice(0, 6)).slice(0, 8);
 
       if (proactiveSlots.length > 0) {
@@ -126,7 +127,7 @@ export async function orchestrateBooking(
       empresa_id: empresaId,
       service_id: context.service_id,
       date: context.preferred_date,
-      timezone: 'Europe/Lisbon',
+      timezone,
       preferred_time: context.preferred_time ?? undefined,
     });
 
@@ -162,13 +163,13 @@ export async function orchestrateBooking(
 
     const tomorrow = new Date(context.preferred_date + 'T12:00:00');
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toLocaleDateString('en-CA', { timeZone: 'Europe/Lisbon' });
+    const tomorrowStr = tomorrow.toLocaleDateString('en-CA', { timeZone: timezone });
 
     const alternatives = await findNextAvailableDays(
       empresaId,
       context.service_id,
       tomorrowStr,
-      'Europe/Lisbon',
+      timezone,
       3
     );
 

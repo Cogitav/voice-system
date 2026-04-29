@@ -1914,7 +1914,7 @@ serve(async (req) => {
         }, updatedContext.context_version);
       }
 
-      const result = await executeReschedule(updatedContext, empresaId, agentId, conversationId);
+      const result = await executeReschedule(updatedContext, empresaId, agentId, conversationId, timezone);
       if (result.success) {
         const confirmedSlot = updatedContext.selected_slot!;
         const snapshot = {
@@ -1981,7 +1981,8 @@ serve(async (req) => {
           recoveryContext,
           empresaId,
           requirePhone,
-          requireReason
+          requireReason,
+          timezone
         );
         const recoverySlots =
           recoveryOrchestration.slots ??
@@ -2103,7 +2104,7 @@ serve(async (req) => {
         result_error: null,
       });
 
-      const result = await executeBooking(updatedContext, empresaId, agentId, conversationId);
+      const result = await executeBooking(updatedContext, empresaId, agentId, conversationId, timezone);
       logFlow('[FLOW_DEBUG_BOOKING]', {
         stage: 'after_execute',
         source,
@@ -2177,7 +2178,8 @@ serve(async (req) => {
           recoveryContext,
           empresaId,
           requirePhone,
-          requireReason
+          requireReason,
+          timezone
         );
         const recoverySlots =
           recoveryOrchestration.slots ??
@@ -2380,7 +2382,7 @@ serve(async (req) => {
         slots_page: 0,
         slots_generated_for_date: null,
       };
-      const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason);
+      const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason, timezone);
       updatedContext = await updateContext(conversationId, {
         ...orchestration.context_updates,
         current_intent: bookingFlowIntent,
@@ -2442,7 +2444,7 @@ serve(async (req) => {
         selected_slot: null,
         reschedule_new_slot: null,
       };
-      const orchestration = await orchestrateBooking(recoveryContext, empresaId, requirePhone, requireReason);
+      const orchestration = await orchestrateBooking(recoveryContext, empresaId, requirePhone, requireReason, timezone);
       updatedContext = await updateContext(conversationId, {
         ...orchestration.context_updates,
         selected_slot: null,
@@ -2607,7 +2609,8 @@ serve(async (req) => {
           },
           empresaId,
           requirePhone,
-          requireReason
+          requireReason,
+          timezone
         );
         updatedContext = await updateContext(conversationId, {
           ...orchestration.context_updates,
@@ -2772,7 +2775,7 @@ serve(async (req) => {
             state: 'collecting_data' as const,
             current_intent: bookingFlowIntent,
           };
-          const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason);
+          const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason, timezone);
           updatedContext = await updateContext(conversationId, {
             ...orchestration.context_updates,
             current_intent: bookingFlowIntent,
@@ -2907,7 +2910,7 @@ serve(async (req) => {
             await processCreateBooking('decision');
           }
         } else {
-          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
+          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
           updatedContext = await updateContext(conversationId, orchestration.context_updates, updatedContext.context_version);
           const slotReply = buildOrchestrationSlotsReply(orchestration.action, orchestration.slots ?? null);
           if (slotReply) {
@@ -3017,7 +3020,7 @@ serve(async (req) => {
               state: 'collecting_data',
               selected_slot: null,
             }, updatedContext.context_version);
-            const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
+            const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
             updatedContext = await updateContext(conversationId, orchestration.context_updates, updatedContext.context_version);
             const slotReply = buildOrchestrationSlotsReply(orchestration.action, orchestration.slots ?? null);
             if (slotReply !== null) {
@@ -3126,7 +3129,7 @@ serve(async (req) => {
             : 'Preciso que indique o serviço pretendido para continuar.';
         } else if (updatedContext.service_id) {
           // Service resolved this turn → advance to orchestrator (will go to collecting_data or slots)
-          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
+          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
           updatedContext = await updateContext(conversationId, {
             ...orchestration.context_updates,
             current_intent: 'BOOKING_NEW',
@@ -3204,7 +3207,7 @@ serve(async (req) => {
             // Customer data/reason requirements are collected before availability generation.
           } else {
             // Service already resolved from extraction → go straight to orchestration
-            const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
+            const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
             updatedContext = await updateContext(conversationId, {
               ...orchestration.context_updates,
               current_intent: 'BOOKING_NEW',
@@ -3249,7 +3252,7 @@ serve(async (req) => {
             state: 'collecting_data' as const,
             current_intent: 'BOOKING_NEW' as const,
           };
-          const orchestration = await orchestrateBooking(preOrchestrationContext, empresaId, requirePhone, requireReason);
+          const orchestration = await orchestrateBooking(preOrchestrationContext, empresaId, requirePhone, requireReason, timezone);
           updatedContext = await updateContext(conversationId, {
             ...orchestration.context_updates,
             current_intent: 'BOOKING_NEW',
@@ -3304,7 +3307,7 @@ serve(async (req) => {
           state: nextState,
           current_intent: 'BOOKING_NEW',
         }, updatedContext.context_version);
-        const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
+        const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
         updatedContext = await updateContext(conversationId, {
           ...orchestration.context_updates,
           current_intent: 'BOOKING_NEW',
