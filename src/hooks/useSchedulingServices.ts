@@ -19,6 +19,7 @@ export interface SchedulingService {
   promo_price: number | null;
   promo_start: string | null;
   promo_end: string | null;
+  requires_reason: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -38,6 +39,7 @@ export interface SchedulingServiceFormData {
   promo_price?: number | null;
   promo_start?: string | null;
   promo_end?: string | null;
+  requires_reason?: boolean | null;
 }
 
 export function useSchedulingServices(empresaId?: string) {

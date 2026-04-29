@@ -35,9 +35,23 @@ const schema = z.object({
   promo_price: z.coerce.number().min(0).optional().nullable(),
   promo_start: z.string().optional().nullable(),
   promo_end: z.string().optional().nullable(),
+  requires_reason: z.enum(['inherit', 'require', 'skip']),
 });
 
 type FormValues = z.infer<typeof schema>;
+type RequiresReasonFormValue = FormValues['requires_reason'];
+
+function toRequiresReasonPayload(value: RequiresReasonFormValue): boolean | null {
+  if (value === 'require') return true;
+  if (value === 'skip') return false;
+  return null;
+}
+
+function toRequiresReasonFormValue(value: boolean | null | undefined): RequiresReasonFormValue {
+  if (value === true) return 'require';
+  if (value === false) return 'skip';
+  return 'inherit';
+}
 
 interface Props {
   empresaId: string;
@@ -69,6 +83,7 @@ export function SchedulingServiceFormDialog({ empresaId, service, open, onOpenCh
       promo_price: null,
       promo_start: null,
       promo_end: null,
+      requires_reason: 'inherit',
     },
   });
 
@@ -89,19 +104,28 @@ export function SchedulingServiceFormDialog({ empresaId, service, open, onOpenCh
         promo_price: service.promo_price,
         promo_start: service.promo_start ? service.promo_start.substring(0, 10) : null,
         promo_end: service.promo_end ? service.promo_end.substring(0, 10) : null,
+        requires_reason: toRequiresReasonFormValue(service.requires_reason),
       });
     } else if (open) {
       form.reset({
         name: '', description: '', duration_minutes: 30,
         buffer_before_minutes: 0, buffer_after_minutes: 0, status: 'active', show_in_chat_menu: true, bookable: true, priority: 0,
-        price: null, currency: 'EUR', promo_price: null, promo_start: null, promo_end: null,
+        price: null, currency: 'EUR', promo_price: null, promo_start: null, promo_end: null, requires_reason: 'inherit',
       });
     }
   }, [open, service, form]);
 
   const onSubmit = (values: FormValues) => {
+    const requiresReason = toRequiresReasonPayload(values.requires_reason);
+
     if (isEditing && service) {
-      updateMutation.mutate({ id: service.id, data: values });
+      updateMutation.mutate({
+        id: service.id,
+        data: {
+          ...values,
+          requires_reason: requiresReason,
+        },
+      });
     } else {
       createMutation.mutate({
         name: values.name,
@@ -113,6 +137,7 @@ export function SchedulingServiceFormDialog({ empresaId, service, open, onOpenCh
         show_in_chat_menu: values.show_in_chat_menu,
         bookable: values.bookable,
         priority: values.priority,
+        requires_reason: requiresReason,
       });
     }
   };
@@ -229,6 +254,23 @@ export function SchedulingServiceFormDialog({ empresaId, service, open, onOpenCh
                   </FormControl>
                   <FormDescription className="text-xs">
                     Define a ordem de apresentação deste serviço no menu inicial. Menor = aparece primeiro.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="requires_reason" render={({ field }) => (
+                <FormItem className="mt-3">
+                  <FormLabel>Motivo da marcação</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="inherit">Herdar da configuração da empresa</SelectItem>
+                      <SelectItem value="require">Pedir motivo para este serviço</SelectItem>
+                      <SelectItem value="skip">Não pedir motivo para este serviço</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription className="text-xs">
+                    Define se o assistente deve pedir o motivo da marcação para este serviço. Por defeito, herda a configuração geral da empresa.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

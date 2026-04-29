@@ -1774,6 +1774,7 @@ export type Database = {
           promo_end: string | null
           promo_price: number | null
           promo_start: string | null
+          requires_reason: boolean | null
           show_in_chat_menu: boolean
           status: string
           updated_at: string
@@ -1794,6 +1795,7 @@ export type Database = {
           promo_end?: string | null
           promo_price?: number | null
           promo_start?: string | null
+          requires_reason?: boolean | null
           show_in_chat_menu?: boolean
           status?: string
           updated_at?: string
@@ -1814,6 +1816,7 @@ export type Database = {
           promo_end?: string | null
           promo_price?: number | null
           promo_start?: string | null
+          requires_reason?: boolean | null
           show_in_chat_menu?: boolean
           status?: string
           updated_at?: string
