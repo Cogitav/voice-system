@@ -268,20 +268,30 @@ function extractDecisionMissingFields(payload?: Record<string, unknown>): string
   return missing.filter((field): field is string => typeof field === 'string');
 }
 
+type RequiredBookingFields = {
+  requireName: boolean;
+  requireEmail: boolean;
+  requirePhone: boolean;
+  requireReason: boolean;
+};
+
 function getMissingBookingFieldLabels(
   ctx: ConversationContext,
-  requirePhone: boolean,
-  requireReason: boolean,
+  requiredFields: RequiredBookingFields,
   preferredMissingFields: string[] = []
 ): string[] {
   const fallbackFields = [
-    !ctx.customer_name ? 'customer_name' : null,
-    !ctx.customer_email ? 'customer_email' : null,
-    requirePhone && !ctx.customer_phone ? 'customer_phone' : null,
-    requireReason && !ctx.customer_reason ? 'customer_reason' : null,
+    requiredFields.requireName && !ctx.customer_name ? 'customer_name' : null,
+    requiredFields.requireEmail && !ctx.customer_email ? 'customer_email' : null,
+    requiredFields.requirePhone && !ctx.customer_phone ? 'customer_phone' : null,
+    requiredFields.requireReason && !ctx.customer_reason ? 'customer_reason' : null,
   ].filter(Boolean) as string[];
 
-  const fields = preferredMissingFields.length > 0 ? preferredMissingFields : fallbackFields;
+  const preferredOrder = preferredMissingFields.filter((field) => fallbackFields.includes(field));
+  const fields = [
+    ...preferredOrder,
+    ...fallbackFields.filter((field) => !preferredOrder.includes(field)),
+  ];
   const labels: Record<string, string> = {
     customer_name: 'nome completo',
     customer_email: 'email',
@@ -292,16 +302,24 @@ function getMissingBookingFieldLabels(
   return Array.from(new Set(fields.map((field) => labels[field] ?? field)));
 }
 
+function joinPtList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  if (items.length === 2) return `${items[0]} e ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')} e ${items[items.length - 1]}`;
+}
+
 function buildMissingDataPrompt(fieldLabels: string[]): string {
   if (fieldLabels.length === 0) {
     return 'Para continuar, preciso de alguns dados.';
   }
 
   if (fieldLabels.length === 1) {
-    return `Para continuar, só preciso do seu ${fieldLabels[0]}.`;
+    return fieldLabels[0] === 'motivo da marcação'
+      ? 'Só falta indicar o motivo da marcação.'
+      : `Para continuar, preciso do seu ${fieldLabels[0]}.`;
   }
 
-  return `Para continuar, só preciso dos seguintes dados: ${fieldLabels.join(', ')}.`;
+  return `Para continuar, preciso de ${joinPtList(fieldLabels)}.`;
 }
 
 function summarizeSlotForLog(slot: any): Record<string, unknown> | null {
@@ -444,12 +462,10 @@ function isAvailabilityQuestion(userMessage: string): boolean {
 
 function hasRequiredCustomerDataForAvailability(
   ctx: ConversationContext,
-  requirePhone: boolean,
+  requiredFields: RequiredBookingFields,
 ): boolean {
   return !!ctx.service_id &&
-    !!ctx.customer_name &&
-    !!ctx.customer_email &&
-    (!requirePhone || !!ctx.customer_phone);
+    getMissingBookingFieldLabels(ctx, requiredFields).length === 0;
 }
 
 function appendConfirmationReminder(answer: string): string {
@@ -1033,6 +1049,8 @@ serve(async (req) => {
       .eq('empresa_id', empresaId)
       .maybeSingle();
 
+    const requireName = bookingConfig?.require_name === true;
+    const requireEmail = bookingConfig?.require_email === true;
     const requirePhone = bookingConfig?.require_phone === true;
     let requireReason = shouldRequireReasonForRuntime(null, bookingConfig);
 
@@ -1735,6 +1753,42 @@ serve(async (req) => {
     const allowLegacyIntentRouting = !isActiveBookingState;
     const decisionActionSupported = SUPPORTED_DECISION_ACTIONS.has(decision.action);
     const isDecisionBookingAction = BOOKING_FLOW_DECISION_ACTIONS.has(decision.action);
+    const getRequiredFields = (): RequiredBookingFields => ({
+      requireName,
+      requireEmail,
+      requirePhone,
+      requireReason,
+    });
+    const getMissingRequiredFieldLabels = (
+      preferredMissingFields: string[] = []
+    ): string[] => getMissingBookingFieldLabels(
+      updatedContext,
+      getRequiredFields(),
+      preferredMissingFields
+    );
+    const blockUntilRequiredFieldsCollected = async (
+      source: string,
+      preferredMissingFields: string[] = []
+    ): Promise<boolean> => {
+      const missingFieldLabels = getMissingRequiredFieldLabels(preferredMissingFields);
+      if (missingFieldLabels.length === 0) return false;
+
+      logFlow('[FLOW_REQUIRED_FIELDS_BLOCK]', {
+        conversation_id: conversationId,
+        source,
+        state: updatedContext.state ?? null,
+        service_id: updatedContext.service_id ?? null,
+        missing_fields: missingFieldLabels,
+      });
+
+      updatedContext = await updateContext(conversationId, {
+        state: 'collecting_data',
+        selected_slot: null,
+        reschedule_new_slot: null,
+      }, updatedContext.context_version);
+      reply = buildMissingDataPrompt(missingFieldLabels);
+      return true;
+    };
 
     const processTimeBasedSlotSearch = async (source: 'decision' | 'legacy_state') => {
       logFlow('[FLOW_BRANCH]', {
@@ -1743,6 +1797,10 @@ serve(async (req) => {
         source,
         state: updatedContext.state ?? null,
       });
+
+      if (await blockUntilRequiredFieldsCollected('SLOT_SEARCH_BY_TIME')) {
+        return;
+      }
 
       const availableSlotsCount = updatedContext.available_slots.length;
       const requestedTime = extraction.time_parsed ?? '';
@@ -1769,11 +1827,7 @@ serve(async (req) => {
       logTimeOperatorDebug(userMessage, extraction, matchedSlot?.start ?? null, match.match_strategy);
 
       if (matchedSlot && (match.match_type === 'exact' || match.match_type === 'closest')) {
-        const missingFieldLabels = getMissingBookingFieldLabels(
-          updatedContext,
-          requirePhone,
-          requireReason
-        );
+        const missingFieldLabels = getMissingRequiredFieldLabels();
         const isExact = match.match_type === 'exact';
         const matchedTime = extractTimeStart(matchedSlot) ?? buildSlotDisplay(matchedSlot);
         const closestPrefix = isExact
@@ -1789,14 +1843,7 @@ serve(async (req) => {
                   : `Não temos exatamente às ${requestedTime}, mas temos às ${matchedTime}. Pode ser?`;
 
         if (missingFieldLabels.length > 0) {
-          updatedContext = await updateContext(
-            conversationId,
-            buildSlotSelectionUpdates(updatedContext, matchedSlot, 'collecting_data', 'TIME_BASED_SELECTION'),
-            updatedContext.context_version
-          );
-
-          const dataPrompt = buildMissingDataPrompt(missingFieldLabels);
-          reply = closestPrefix ? `${closestPrefix}\n\n${dataPrompt}` : dataPrompt;
+          await blockUntilRequiredFieldsCollected('SLOT_SEARCH_BY_TIME');
           return;
         }
 
@@ -2296,10 +2343,18 @@ serve(async (req) => {
       if (
         !isAvailabilityQuestion(userMessage) ||
         isPriceQuestion(userMessage) ||
-        !hasRequiredCustomerDataForAvailability(updatedContext, requirePhone) ||
         updatedContext.state === 'booking_processing'
       ) {
         return false;
+      }
+
+      if (!updatedContext.service_id) {
+        return false;
+      }
+
+      if (!hasRequiredCustomerDataForAvailability(updatedContext, getRequiredFields())) {
+        await blockUntilRequiredFieldsCollected('AVAILABILITY_QUESTION');
+        return true;
       }
 
       const bookingFlowIntent: 'RESCHEDULE' | 'BOOKING_NEW' = updatedContext.reschedule_from_agendamento_id
@@ -2646,36 +2701,40 @@ serve(async (req) => {
           state: 'collecting_data',
         }, updatedContext.context_version);
 
-        const shouldUseDeterministicDatePrompt =
-          !!updatedContext.service_name && hasBookingContinuationSignal(userMessage, extraction);
-
-        if (shouldUseDeterministicDatePrompt) {
-          reply = `Claro. Para avançar com ${updatedContext.service_name}, indique a data e hora que prefere. Se quiser, pode escrever algo como 'hoje às 12h30'.`;
+        if (await blockUntilRequiredFieldsCollected('ASK_DATE')) {
+          // Customer data/reason requirements are collected before asking for availability.
         } else {
-          const askDateContent = updatedContext.service_name
-          ? `Pergunta de forma clara para que data prefere o agendamento de ${updatedContext.service_name}.`
-          : 'Pergunta de forma clara para que data prefere o agendamento.';
+          const shouldUseDeterministicDatePrompt =
+            !!updatedContext.service_name && hasBookingContinuationSignal(userMessage, extraction);
 
-          const directive = buildResponseDirective({
-            state: updatedContext.state,
-            mustSayBlocks: [{
-              type: 'ask_date',
-              content: askDateContent,
-              priority: 1,
-            }],
-            confirmedData: buildConfirmedSnapshot(updatedContext),
-            emotionalContext: emotionalContext as any,
-            language: 'pt-PT',
-          });
+          if (shouldUseDeterministicDatePrompt) {
+            reply = `Claro. Para avançar com ${updatedContext.service_name}, indique a data e hora que prefere. Se quiser, pode escrever algo como 'hoje às 12h30'.`;
+          } else {
+            const askDateContent = updatedContext.service_name
+            ? `Pergunta de forma clara para que data prefere o agendamento de ${updatedContext.service_name}.`
+            : 'Pergunta de forma clara para que data prefere o agendamento.';
 
-          reply = await generateResponse(
-            userMessage,
-            updatedContext,
-            serializeDirectiveToPrompt(directive),
-            null,
-            agentCtx,
-            empresaId,
-          );
+            const directive = buildResponseDirective({
+              state: updatedContext.state,
+              mustSayBlocks: [{
+                type: 'ask_date',
+                content: askDateContent,
+                priority: 1,
+              }],
+              confirmedData: buildConfirmedSnapshot(updatedContext),
+              emotionalContext: emotionalContext as any,
+              language: 'pt-PT',
+            });
+
+            reply = await generateResponse(
+              userMessage,
+              updatedContext,
+              serializeDirectiveToPrompt(directive),
+              null,
+              agentCtx,
+              empresaId,
+            );
+          }
         }
 
       } else if (decision.action === 'ASK_PERSONAL_DATA') {
@@ -2686,37 +2745,13 @@ serve(async (req) => {
           state: updatedContext.state ?? null,
         });
 
-        const missingFieldLabels = getMissingBookingFieldLabels(
-          updatedContext,
-          requirePhone,
-          requireReason,
+        const blockedForMissingFields = await blockUntilRequiredFieldsCollected(
+          'ASK_PERSONAL_DATA',
           extractDecisionMissingFields(decision.payload)
         );
-
-        updatedContext = await updateContext(conversationId, {
-          state: 'collecting_data',
-        }, updatedContext.context_version);
-
-        const directive = buildResponseDirective({
-          state: updatedContext.state,
-          mustSayBlocks: [{
-            type: 'ask_multiple_fields',
-            content: buildMissingDataPrompt(missingFieldLabels),
-            priority: 1,
-          }],
-          confirmedData: buildConfirmedSnapshot(updatedContext),
-          emotionalContext: emotionalContext as any,
-          language: 'pt-PT',
-        });
-
-        reply = await generateResponse(
-          userMessage,
-          updatedContext,
-          serializeDirectiveToPrompt(directive),
-          null,
-          agentCtx,
-          empresaId,
-        );
+        if (!blockedForMissingFields) {
+          reply = 'Já tenho os dados necessários. Diga-me a data ou horário que prefere.';
+        }
 
       } else if (decision.action === 'GENERATE_SLOTS') {
         logFlow('[FLOW_BRANCH]', {
@@ -2726,49 +2761,53 @@ serve(async (req) => {
           state: updatedContext.state ?? null,
         });
 
-        const bookingFlowIntent: 'RESCHEDULE' | 'BOOKING_NEW' = updatedContext.reschedule_from_agendamento_id
-          ? 'RESCHEDULE'
-          : 'BOOKING_NEW';
-        const orchestrationContext = {
-          ...updatedContext,
-          state: 'collecting_data' as const,
-          current_intent: bookingFlowIntent,
-        };
-        const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason);
-        updatedContext = await updateContext(conversationId, {
-          ...orchestration.context_updates,
-          current_intent: bookingFlowIntent,
-        }, updatedContext.context_version);
-
-        if (
-          (extraction.time_parsed || extraction.relative_time_direction) &&
-          updatedContext.available_slots.length > 0
-        ) {
-          await processTimeBasedSlotSearch('decision');
-          // Time-based generation is fully handled here; do not also present the generic list.
+        if (await blockUntilRequiredFieldsCollected('GENERATE_SLOTS')) {
+          // Required booking fields must be collected before availability is shown.
         } else {
-          const hasSlots =
-            orchestration.action === 'SHOW_SLOTS' ||
-            orchestration.action === 'SHOW_EXISTING_SLOTS' ||
-            orchestration.action === 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES' ||
-            orchestration.action === 'SINGLE_SLOT_CONFIRM' ||
-            orchestration.action === 'PROACTIVE_SLOTS';
-          const slotReply = buildOrchestrationSlotsReply(
-            orchestration.action,
-            hasSlots ? (orchestration.slots ?? null) : null
-          );
+          const bookingFlowIntent: 'RESCHEDULE' | 'BOOKING_NEW' = updatedContext.reschedule_from_agendamento_id
+            ? 'RESCHEDULE'
+            : 'BOOKING_NEW';
+          const orchestrationContext = {
+            ...updatedContext,
+            state: 'collecting_data' as const,
+            current_intent: bookingFlowIntent,
+          };
+          const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason);
+          updatedContext = await updateContext(conversationId, {
+            ...orchestration.context_updates,
+            current_intent: bookingFlowIntent,
+          }, updatedContext.context_version);
 
-          if (slotReply) {
-            reply = slotReply;
+          if (
+            (extraction.time_parsed || extraction.relative_time_direction) &&
+            updatedContext.available_slots.length > 0
+          ) {
+            await processTimeBasedSlotSearch('decision');
+            // Time-based generation is fully handled here; do not also present the generic list.
           } else {
-            reply = await generateResponse(
-              userMessage,
-              updatedContext,
-              orchestration.response_hint,
-              hasSlots ? (orchestration.slots ?? null) : null,
-              agentCtx,
-              empresaId,
+            const hasSlots =
+              orchestration.action === 'SHOW_SLOTS' ||
+              orchestration.action === 'SHOW_EXISTING_SLOTS' ||
+              orchestration.action === 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES' ||
+              orchestration.action === 'SINGLE_SLOT_CONFIRM' ||
+              orchestration.action === 'PROACTIVE_SLOTS';
+            const slotReply = buildOrchestrationSlotsReply(
+              orchestration.action,
+              hasSlots ? (orchestration.slots ?? null) : null
             );
+
+            if (slotReply) {
+              reply = slotReply;
+            } else {
+              reply = await generateResponse(
+                userMessage,
+                updatedContext,
+                orchestration.response_hint,
+                hasSlots ? (orchestration.slots ?? null) : null,
+                agentCtx,
+                empresaId,
+              );
+            }
           }
         }
 
@@ -2780,14 +2819,18 @@ serve(async (req) => {
           state: updatedContext.state ?? null,
         });
 
-        updatedContext = await updateContext(conversationId, {
-          state: 'awaiting_slot_selection',
-        }, updatedContext.context_version);
-        reply = buildSlotsPresentationReply(
-          updatedContext.available_slots,
-          'Tenho estes horários disponíveis para essa data:',
-          'Indique o número do horário que prefere.'
-        );
+        if (await blockUntilRequiredFieldsCollected('SHOW_SLOTS')) {
+          // Required booking fields must be collected before slots are displayed.
+        } else {
+          updatedContext = await updateContext(conversationId, {
+            state: 'awaiting_slot_selection',
+          }, updatedContext.context_version);
+          reply = buildSlotsPresentationReply(
+            updatedContext.available_slots,
+            'Tenho estes horários disponíveis para essa data:',
+            'Indique o número do horário que prefere.'
+          );
+        }
 
       } else if (decision.action === 'SLOT_SEARCH_BY_TIME' && updatedContext.available_slots.length > 0) {
         await processTimeBasedSlotSearch('decision');
@@ -2809,39 +2852,10 @@ serve(async (req) => {
         );
 
         if (selectedSlot) {
-          const missingFieldLabels = getMissingBookingFieldLabels(
-            updatedContext,
-            requirePhone,
-            requireReason
-          );
+          const missingFieldLabels = getMissingRequiredFieldLabels();
 
           if (missingFieldLabels.length > 0) {
-            updatedContext = await updateContext(
-              conversationId,
-              buildSlotSelectionUpdates(updatedContext, selectedSlot, 'collecting_data'),
-              updatedContext.context_version
-            );
-
-            const directive = buildResponseDirective({
-              state: updatedContext.state,
-              mustSayBlocks: [{
-                type: 'ask_multiple_fields',
-                content: buildMissingDataPrompt(missingFieldLabels),
-                priority: 1,
-              }],
-              confirmedData: buildConfirmedSnapshot(updatedContext, selectedSlot),
-              emotionalContext: emotionalContext as any,
-              language: 'pt-PT',
-            });
-
-            reply = await generateResponse(
-              userMessage,
-              updatedContext,
-              serializeDirectiveToPrompt(directive),
-              null,
-              agentCtx,
-              empresaId,
-            );
+            await blockUntilRequiredFieldsCollected('SELECT_SLOT');
           } else {
             updatedContext = await updateContext(
               conversationId,
@@ -2873,17 +2887,25 @@ serve(async (req) => {
           state: updatedContext.state ?? null,
         });
 
-        updatedContext = await updateContext(conversationId, {
-          state: 'awaiting_confirmation',
-        }, updatedContext.context_version);
+        if (await blockUntilRequiredFieldsCollected('CONFIRM_BOOKING')) {
+          // Required booking fields must be present before confirmation is shown.
+        } else {
+          updatedContext = await updateContext(conversationId, {
+            state: 'awaiting_confirmation',
+          }, updatedContext.context_version);
 
-        reply = HARDCODED_TEMPLATES.awaiting_confirmation(
-          buildConfirmedSnapshot(updatedContext)
-        );
+          reply = HARDCODED_TEMPLATES.awaiting_confirmation(
+            buildConfirmedSnapshot(updatedContext)
+          );
+        }
 
       } else if (decision.action === 'CREATE_BOOKING') {
         if (updatedContext.selected_slot) {
-          await processCreateBooking('decision');
+          if (await blockUntilRequiredFieldsCollected('CREATE_BOOKING')) {
+            // Required booking fields must be present before booking creation.
+          } else {
+            await processCreateBooking('decision');
+          }
         } else {
           const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
           updatedContext = await updateContext(conversationId, orchestration.context_updates, updatedContext.context_version);
@@ -3178,6 +3200,8 @@ serve(async (req) => {
               agentCtx,
               empresaId,
             );
+          } else if (await blockUntilRequiredFieldsCollected('IDLE_SERVICE_RESOLVED')) {
+            // Customer data/reason requirements are collected before availability generation.
           } else {
             // Service already resolved from extraction → go straight to orchestration
             const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason);
@@ -3212,9 +3236,13 @@ serve(async (req) => {
 
           if (true) {
             // Phase 1 / Sprint 4: collecting_data must be driven by decision.action only.
-            reply = updatedContext.available_slots.length > 0
-              ? 'Pode indicar o número do horário que prefere ou dizer outro horário.'
-              : 'Pode indicar a data pretendida ou os dados em falta para continuar.';
+            if (await blockUntilRequiredFieldsCollected('COLLECTING_DATA_FALLBACK')) {
+              // Deterministic missing-field collection wins over generic fallback wording.
+            } else {
+              reply = updatedContext.available_slots.length > 0
+                ? 'Pode indicar o número do horário que prefere ou dizer outro horário.'
+                : 'Pode indicar a data pretendida para continuar.';
+            }
           } else {
             const preOrchestrationContext = {
             ...updatedContext,
