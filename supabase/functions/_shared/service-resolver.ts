@@ -1,12 +1,23 @@
 import { SchedulingService } from './types.ts';
 import { callLLMSimple } from './llm-provider.ts';
 import { getServiceClient } from './supabase-client.ts';
+import { logAgentEvent } from './logger.ts';
 
 interface ServiceResolveResult {
   service_id: string | null;
   service_name: string | null;
   confidence: number;
   method: 'deterministic' | 'llm' | 'fallback';
+}
+
+interface ServiceResolutionObservability {
+  conversation_id?: string | null;
+  state?: string | null;
+  current_intent?: string | null;
+  existing_service_id?: string | null;
+  selected_slot?: unknown;
+  required_fields_missing?: unknown;
+  decision_action?: string | null;
 }
 
 const AUTO_SELECT_CONFIDENCE_THRESHOLD = 0.8;
@@ -145,25 +156,49 @@ async function unresolvedResult(
 export async function resolveService(
   message: string,
   empresaId: string,
-  services?: SchedulingService[]
+  services?: SchedulingService[],
+  observability?: ServiceResolutionObservability,
 ): Promise<ServiceResolveResult> {
   const available = services ?? await loadServices(empresaId);
+  const withLog = (result: ServiceResolveResult): ServiceResolveResult => {
+    if (observability?.conversation_id) {
+      const loggedMethod = result.method === 'llm' ? 'semantic' : result.method;
+      void logAgentEvent(
+        'FLOW_SERVICE_RESOLUTION_RESULT',
+        {
+          conversation_id: observability.conversation_id,
+          state: observability.state ?? null,
+          current_intent: observability.current_intent ?? null,
+          service_id: result.service_id ?? observability.existing_service_id ?? null,
+          selected_slot: observability.selected_slot ?? null,
+          required_fields_missing: observability.required_fields_missing ?? null,
+          decision_action: observability.decision_action ?? null,
+          service_name: result.service_name,
+          method: loggedMethod,
+          confidence: result.confidence,
+          resolved_service_id: result.service_id,
+        },
+        observability.conversation_id,
+      );
+    }
+    return result;
+  };
 
   if (available.length === 0) {
-    return await unresolvedResult(empresaId, available, 0, 'deterministic');
+    return withLog(await unresolvedResult(empresaId, available, 0, 'deterministic'));
   }
 
   if (available.length === 1) {
-    return { service_id: available[0].id, service_name: available[0].name, confidence: 0.9, method: 'deterministic' };
+    return withLog({ service_id: available[0].id, service_name: available[0].name, confidence: 0.9, method: 'deterministic' });
   }
 
   const deterministic = tryDeterministic(message, available);
   if (deterministic) {
     if (deterministic.confidence >= AUTO_SELECT_CONFIDENCE_THRESHOLD) {
-      return deterministic;
+      return withLog(deterministic);
     }
 
-    return await unresolvedResult(empresaId, available, deterministic.confidence, 'deterministic');
+    return withLog(await unresolvedResult(empresaId, available, deterministic.confidence, 'deterministic'));
   }
 
   try {
@@ -189,23 +224,23 @@ Regras:
     const parsedConfidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
 
     if (parsed.service_index !== null && parsedConfidence < AUTO_SELECT_CONFIDENCE_THRESHOLD) {
-      return await unresolvedResult(empresaId, available, parsedConfidence, 'llm');
+      return withLog(await unresolvedResult(empresaId, available, parsedConfidence, 'llm'));
     }
 
     if (parsed.service_index !== null && parsedConfidence >= AUTO_SELECT_CONFIDENCE_THRESHOLD) {
       const idx = parseInt(parsed.service_index) - 1;
       if (idx >= 0 && idx < available.length) {
-        return {
+        return withLog({
           service_id: available[idx].id,
           service_name: available[idx].name,
           confidence: parsedConfidence,
           method: 'llm',
-        };
+        });
       }
     }
   } catch {
     // LLM failed
   }
 
-  return await unresolvedResult(empresaId, available, 0, 'llm');
+  return withLog(await unresolvedResult(empresaId, available, 0, 'llm'));
 }

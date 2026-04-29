@@ -2,7 +2,7 @@ import { getServiceClient } from './supabase-client.ts';
 import { ConversationContext, BookingResult, CustomerData } from './types.ts';
 import { checkAvailability } from './availability-engine.ts';
 import { consumeCredits } from './credit-manager.ts';
-import { log, logAction } from './logger.ts';
+import { log, logAction, logAgentEvent } from './logger.ts';
 import { guardBookingExecution } from './guardrails.ts';
 import { randomUUID } from 'https://deno.land/std@0.177.0/node/crypto.ts';
 
@@ -67,6 +67,37 @@ function bookingOverlapsSlot(
   return slotStart < bookingEnd && slotEnd > bookingStart;
 }
 
+function summarizeSlot(slot: ConversationContext['selected_slot']): Record<string, unknown> | null {
+  if (!slot) return null;
+  return {
+    start: slot.start ?? null,
+    end: slot.end ?? null,
+    resource_id: slot.resource_id ?? null,
+  };
+}
+
+function logBookingFlowEvent(
+  eventType: string,
+  context: ConversationContext,
+  conversationId: string,
+  extras: Record<string, unknown> = {},
+): void {
+  void logAgentEvent(
+    eventType,
+    {
+      conversation_id: conversationId,
+      state: context.state ?? null,
+      current_intent: context.current_intent ?? null,
+      service_id: context.service_id ?? null,
+      selected_slot: summarizeSlot(context.selected_slot),
+      required_fields_missing: context.fields_missing ?? null,
+      decision_action: extras.decision_action ?? null,
+      ...extras,
+    },
+    conversationId,
+  );
+}
+
 export async function executeBooking(
   context: ConversationContext,
   empresaId: string,
@@ -74,8 +105,17 @@ export async function executeBooking(
   conversationId: string,
   timezone: string
 ): Promise<BookingResult> {
+  logBookingFlowEvent('FLOW_BOOKING_ATTEMPT', context, conversationId, {
+    execution_id: context.execution_id ?? null,
+  });
+
   const guard = guardBookingExecution(context);
   if (!guard.allowed) {
+    logBookingFlowEvent('FLOW_BOOKING_FAILURE', context, conversationId, {
+      reason: 'guard_failed',
+      error_code: 'GUARD_FAILED',
+      error: guard.reason,
+    });
     return { success: false, agendamento_id: null, error: guard.reason, error_code: 'GUARD_FAILED' };
   }
 
@@ -91,6 +131,11 @@ export async function executeBooking(
     .single();
 
   if (existing) {
+    logBookingFlowEvent('FLOW_BOOKING_SUCCESS', context, conversationId, {
+      reason: 'duplicate_execution',
+      agendamento_id: existing.id,
+      execution_id: executionId,
+    });
     return { success: true, agendamento_id: existing.id, error: null, error_code: null };
   }
 
@@ -170,6 +215,11 @@ export async function executeBooking(
       message: 'Slot blocked by existing booking on the same resource',
       payload: conflictPayload,
     });
+    logBookingFlowEvent('FLOW_BOOKING_FAILURE', context, conversationId, {
+      reason: 'resource_scoped_conflict',
+      error_code: 'SLOT_CONFLICT',
+      conflict_payload: conflictPayload,
+    });
     return { success: false, agendamento_id: null, error: 'Slot ja nao esta disponivel.', error_code: 'SLOT_CONFLICT' };
   }
 
@@ -217,6 +267,10 @@ export async function executeBooking(
       event_type: 'BOOKING_SLOT_CONFLICT',
       message: 'Slot no longer available at execution time',
       payload: { slot, service_id: context.service_id },
+    });
+    logBookingFlowEvent('FLOW_BOOKING_FAILURE', context, conversationId, {
+      reason: 'availability_recheck_failed',
+      error_code: 'SLOT_CONFLICT',
     });
     return { success: false, agendamento_id: null, error: 'Slot já não está disponível.', error_code: 'SLOT_CONFLICT' };
   }
@@ -322,9 +376,19 @@ export async function executeBooking(
     }, 'error');
 
     if (isSlotUniquenessError(bookingError)) {
+      logBookingFlowEvent('FLOW_BOOKING_FAILURE', context, conversationId, {
+        reason: 'slot_uniqueness_error',
+        error_code: 'SLOT_CONFLICT',
+        booking_error: serializeBookingError(bookingError),
+      });
       return { success: false, agendamento_id: null, error: 'Slot ja nao esta disponivel.', error_code: 'SLOT_CONFLICT' };
     }
 
+    logBookingFlowEvent('FLOW_BOOKING_FAILURE', context, conversationId, {
+      reason: 'insert_failed',
+      error_code: 'DB_ERROR',
+      booking_error: serializeBookingError(bookingError),
+    });
     return { success: false, agendamento_id: null, error: 'Erro ao criar agendamento.', error_code: 'DB_ERROR' };
   }
 
@@ -352,6 +416,12 @@ export async function executeBooking(
     action_data: { agendamento_id: booking.id, slot, service_id: context.service_id },
     outcome: 'success',
     credits_consumed: 5,
+  });
+
+  logBookingFlowEvent('FLOW_BOOKING_SUCCESS', context, conversationId, {
+    reason: 'created',
+    agendamento_id: booking.id,
+    execution_id: executionId,
   });
 
   return { success: true, agendamento_id: booking.id, error: null, error_code: null };

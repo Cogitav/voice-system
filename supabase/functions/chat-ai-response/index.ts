@@ -359,13 +359,16 @@ function buildAgentEventPayload(
 ): Record<string, unknown> {
   const email = redactEmailForLog(context.customer_email);
   return {
+    conversation_id: extras.conversation_id ?? null,
     state: context.state ?? null,
-    selected_slot: summarizeSlotForLog(context.selected_slot),
+    current_intent: context.current_intent ?? null,
     service_id: context.service_id ?? null,
+    selected_slot: summarizeSlotForLog(context.selected_slot),
+    required_fields_missing: extras.required_fields_missing ?? null,
+    decision_action: extras.decision_action ?? null,
     service_name: context.service_name ?? null,
     customer_email_redacted: email.redacted,
     customer_email_domain: email.domain,
-    current_intent: context.current_intent ?? null,
     ...extras,
   };
 }
@@ -1076,6 +1079,7 @@ serve(async (req) => {
     const context = await getContext(conversationId);
     const currentVersion = context.context_version;
 
+    const loadedEmailRedaction = redactEmailForLog(context.customer_email);
     logFlow('[FLOW_CONTEXT]', {
       stage: 'loaded',
       conversation_id: conversationId,
@@ -1086,8 +1090,9 @@ serve(async (req) => {
       service_locked: context.service_locked ?? false,
       preferred_date: context.preferred_date ?? null,
       selected_slot: summarizeSlotForLog(context.selected_slot),
-      customer_name: context.customer_name ?? null,
-      customer_email: context.customer_email ?? null,
+      has_customer_name: !!context.customer_name,
+      customer_email_redacted: loadedEmailRedaction.redacted,
+      customer_email_domain: loadedEmailRedaction.domain,
     });
 
     await db.from('messages').insert({
@@ -1363,6 +1368,31 @@ serve(async (req) => {
       menuServicesCache ??= await loadMenuServices(empresaId);
       return menuServicesCache;
     };
+    let decision = { action: null } as unknown as ReturnType<typeof decideNextAction>;
+    const emitFlowEvent = (
+      eventType: string,
+      contextForEvent: ConversationContext,
+      extras: Record<string, unknown> = {},
+    ): void => {
+      void logAgentEvent(
+        eventType,
+        buildAgentEventPayload(contextForEvent, {
+          conversation_id: conversationId,
+          decision_action: decision?.action ?? null,
+          ...extras,
+        }),
+        conversationId,
+      );
+    };
+    const buildServiceResolutionObservability = (contextForEvent: ConversationContext) => ({
+      conversation_id: conversationId,
+      state: contextForEvent.state ?? null,
+      current_intent: contextForEvent.current_intent ?? null,
+      existing_service_id: contextForEvent.service_id ?? null,
+      selected_slot: summarizeSlotForLog(contextForEvent.selected_slot),
+      required_fields_missing: contextForEvent.fields_missing ?? null,
+      decision_action: decision?.action ?? null,
+    });
 
     if (updatedContext.service_id) {
       const currentService = findServiceById(await getServices(), updatedContext.service_id);
@@ -1383,7 +1413,12 @@ serve(async (req) => {
         userMessage,
         Array.isArray(extraction.service_keywords) ? extraction.service_keywords.join(' ') : '',
       ].filter(Boolean).join(' ').trim();
-      const serviceResult = await resolveService(combinedInput, empresaId, services);
+      const serviceResult = await resolveService(
+        combinedInput,
+        empresaId,
+        services,
+        buildServiceResolutionObservability(updatedContext),
+      );
       const isDifferentService =
         !!serviceResult.service_id &&
         serviceResult.service_id !== updatedContext.service_id;
@@ -1420,6 +1455,13 @@ serve(async (req) => {
           conversation_id: conversationId,
           old_service_name: oldServiceName,
           new_service_name: serviceResult.service_name,
+        });
+        emitFlowEvent('FLOW_SERVICE_RESOLVED', updatedContext, {
+          source: 'explicit_service_change',
+          service_id: serviceResult.service_id,
+          service_name: serviceResult.service_name,
+          method: serviceResult.method === 'llm' ? 'semantic' : serviceResult.method,
+          confidence: serviceResult.confidence,
         });
         logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
           previous_service_id: oldServiceId,
@@ -1466,6 +1508,7 @@ serve(async (req) => {
       });
     }
 
+    const updatedEmailRedaction = redactEmailForLog(updatedContext.customer_email);
     logFlow('[FLOW_CONTEXT]', {
       stage: 'after_initial_update',
       conversation_id: conversationId,
@@ -1474,12 +1517,13 @@ serve(async (req) => {
       service_id: updatedContext.service_id ?? null,
       service_source: updatedContext.service_source ?? null,
       service_locked: updatedContext.service_locked ?? false,
-      customer_name: updatedContext.customer_name ?? null,
-      customer_email: updatedContext.customer_email ?? null,
+      has_customer_name: !!updatedContext.customer_name,
+      customer_email_redacted: updatedEmailRedaction.redacted,
+      customer_email_domain: updatedEmailRedaction.domain,
       preferred_date: updatedContext.preferred_date ?? null,
     });
 
-    let decision = decideNextAction({
+    decision = decideNextAction({
       context: updatedContext,
       extraction,
       userMessage,
@@ -1547,6 +1591,13 @@ serve(async (req) => {
         };
         intent = extraction.intent;
         requireReason = shouldRequireReasonForRuntime(numericService, bookingConfig);
+        emitFlowEvent('FLOW_SERVICE_RESOLVED', updatedContext, {
+          source: 'menu_numeric_selection',
+          service_id: numericService.id,
+          service_name: numericService.name,
+          method: 'deterministic',
+          confidence: 1,
+        });
 
         logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
           previous_service_id: previousServiceId,
@@ -1604,6 +1655,13 @@ serve(async (req) => {
           service_locked: true,
         }, updatedContext.context_version);
         requireReason = shouldRequireReasonForRuntime(numericService, bookingConfig);
+        emitFlowEvent('FLOW_SERVICE_RESOLVED', updatedContext, {
+          source: 'menu_numeric_selection',
+          service_id: numericService.id,
+          service_name: numericService.name,
+          method: 'deterministic',
+          confidence: 1,
+        });
 
         logFlow('[FLOW_DEBUG_SERVICE_LOCK]', {
           previous_service_id: previousServiceId,
@@ -1640,7 +1698,12 @@ serve(async (req) => {
           Array.isArray(extraction.service_keywords) ? extraction.service_keywords.join(' ') : '',
         ].filter(Boolean).join(' ').trim();
 
-        const serviceResult = await resolveService(combinedInput, empresaId, services);
+        const serviceResult = await resolveService(
+          combinedInput,
+          empresaId,
+          services,
+          buildServiceResolutionObservability(updatedContext),
+        );
         logFlow('[FLOW_SERVICE]', {
           conversation_id: conversationId,
           service_id: serviceResult?.service_id ?? null,
@@ -1661,6 +1724,13 @@ serve(async (req) => {
             service_source: serviceResult.method,
             service_locked: false,
           }, updatedContext.context_version);
+          emitFlowEvent('FLOW_SERVICE_RESOLVED', updatedContext, {
+            source: 'service_resolution',
+            service_id: serviceResult.service_id,
+            service_name: serviceResult.service_name,
+            method: serviceResult.method === 'llm' ? 'semantic' : serviceResult.method,
+            confidence: serviceResult.confidence,
+          });
 
           decision = decideNextAction({
             context: updatedContext,
@@ -1766,6 +1836,29 @@ serve(async (req) => {
       getRequiredFields(),
       preferredMissingFields
     );
+    const runBookingOrchestration = async (
+      contextForOrchestration: ConversationContext,
+      source: string,
+    ) => {
+      emitFlowEvent('FLOW_SLOT_REQUEST', contextForOrchestration, {
+        source,
+        preferred_date: contextForOrchestration.preferred_date ?? null,
+        preferred_time: contextForOrchestration.preferred_time ?? null,
+        available_slots_count: contextForOrchestration.available_slots?.length ?? 0,
+      });
+
+      return await orchestrateBooking(
+        contextForOrchestration,
+        empresaId,
+        requirePhone,
+        requireReason,
+        timezone,
+        {
+          conversation_id: conversationId,
+          decision_action: decision.action ?? null,
+        },
+      );
+    };
     const blockUntilRequiredFieldsCollected = async (
       source: string,
       preferredMissingFields: string[] = []
@@ -1779,6 +1872,10 @@ serve(async (req) => {
         state: updatedContext.state ?? null,
         service_id: updatedContext.service_id ?? null,
         missing_fields: missingFieldLabels,
+      });
+      emitFlowEvent('FLOW_REQUIRED_FIELDS_BLOCK', updatedContext, {
+        source,
+        required_fields_missing: missingFieldLabels,
       });
 
       updatedContext = await updateContext(conversationId, {
@@ -1853,6 +1950,10 @@ serve(async (req) => {
           updatedContext.context_version
         );
         logSelectedSlotPersisted(conversationId, updatedContext, matchedSlot);
+        emitFlowEvent('FLOW_CONFIRMATION_READY', updatedContext, {
+          source: 'time_based_slot_selection',
+          selected_slot: summarizeSlotForLog(matchedSlot),
+        });
 
         reply = isExact
           ? HARDCODED_TEMPLATES.awaiting_confirmation(buildConfirmedSnapshot(updatedContext, matchedSlot))
@@ -1977,13 +2078,7 @@ serve(async (req) => {
           available_slots: [],
           slots_generated_for_date: null,
         };
-        const recoveryOrchestration = await orchestrateBooking(
-          recoveryContext,
-          empresaId,
-          requirePhone,
-          requireReason,
-          timezone
-        );
+        const recoveryOrchestration = await runBookingOrchestration(recoveryContext, 'reschedule_conflict_recovery');
         const recoverySlots =
           recoveryOrchestration.slots ??
           recoveryOrchestration.context_updates.available_slots ??
@@ -2174,13 +2269,7 @@ serve(async (req) => {
           available_slots: [],
           slots_generated_for_date: null,
         };
-        const recoveryOrchestration = await orchestrateBooking(
-          recoveryContext,
-          empresaId,
-          requirePhone,
-          requireReason,
-          timezone
-        );
+        const recoveryOrchestration = await runBookingOrchestration(recoveryContext, 'booking_conflict_recovery');
         const recoverySlots =
           recoveryOrchestration.slots ??
           recoveryOrchestration.context_updates.available_slots ??
@@ -2382,7 +2471,7 @@ serve(async (req) => {
         slots_page: 0,
         slots_generated_for_date: null,
       };
-      const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason, timezone);
+      const orchestration = await runBookingOrchestration(orchestrationContext, 'availability_question');
       updatedContext = await updateContext(conversationId, {
         ...orchestration.context_updates,
         current_intent: bookingFlowIntent,
@@ -2444,7 +2533,7 @@ serve(async (req) => {
         selected_slot: null,
         reschedule_new_slot: null,
       };
-      const orchestration = await orchestrateBooking(recoveryContext, empresaId, requirePhone, requireReason, timezone);
+      const orchestration = await runBookingOrchestration(recoveryContext, 'missing_selected_slot_recovery');
       updatedContext = await updateContext(conversationId, {
         ...orchestration.context_updates,
         selected_slot: null,
@@ -2602,15 +2691,12 @@ serve(async (req) => {
 
       let handledImmediateReschedule = false;
       if (existingAgendamentoId && (extraction.time_parsed || extraction.date_parsed)) {
-        const orchestration = await orchestrateBooking(
+        const orchestration = await runBookingOrchestration(
           {
             ...updatedContext,
             current_intent: 'RESCHEDULE' as any,
           },
-          empresaId,
-          requirePhone,
-          requireReason,
-          timezone
+          'start_reschedule_immediate'
         );
         updatedContext = await updateContext(conversationId, {
           ...orchestration.context_updates,
@@ -2775,7 +2861,7 @@ serve(async (req) => {
             state: 'collecting_data' as const,
             current_intent: bookingFlowIntent,
           };
-          const orchestration = await orchestrateBooking(orchestrationContext, empresaId, requirePhone, requireReason, timezone);
+          const orchestration = await runBookingOrchestration(orchestrationContext, 'generate_slots');
           updatedContext = await updateContext(conversationId, {
             ...orchestration.context_updates,
             current_intent: bookingFlowIntent,
@@ -2866,6 +2952,10 @@ serve(async (req) => {
               updatedContext.context_version
             );
             logSelectedSlotPersisted(conversationId, updatedContext, selectedSlot);
+            emitFlowEvent('FLOW_CONFIRMATION_READY', updatedContext, {
+              source: 'slot_selection',
+              selected_slot: summarizeSlotForLog(selectedSlot),
+            });
 
             reply = HARDCODED_TEMPLATES.awaiting_confirmation(
               buildConfirmedSnapshot(updatedContext, selectedSlot)
@@ -2896,6 +2986,9 @@ serve(async (req) => {
           updatedContext = await updateContext(conversationId, {
             state: 'awaiting_confirmation',
           }, updatedContext.context_version);
+          emitFlowEvent('FLOW_CONFIRMATION_READY', updatedContext, {
+            source: 'confirm_booking_action',
+          });
 
           reply = HARDCODED_TEMPLATES.awaiting_confirmation(
             buildConfirmedSnapshot(updatedContext)
@@ -2910,7 +3003,7 @@ serve(async (req) => {
             await processCreateBooking('decision');
           }
         } else {
-          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
+          const orchestration = await runBookingOrchestration(updatedContext, 'create_booking_missing_slot');
           updatedContext = await updateContext(conversationId, orchestration.context_updates, updatedContext.context_version);
           const slotReply = buildOrchestrationSlotsReply(orchestration.action, orchestration.slots ?? null);
           if (slotReply) {
@@ -3020,7 +3113,7 @@ serve(async (req) => {
               state: 'collecting_data',
               selected_slot: null,
             }, updatedContext.context_version);
-            const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
+            const orchestration = await runBookingOrchestration(updatedContext, 'legacy_confirmation_blocked_recovery');
             updatedContext = await updateContext(conversationId, orchestration.context_updates, updatedContext.context_version);
             const slotReply = buildOrchestrationSlotsReply(orchestration.action, orchestration.slots ?? null);
             if (slotReply !== null) {
@@ -3129,7 +3222,7 @@ serve(async (req) => {
             : 'Preciso que indique o serviço pretendido para continuar.';
         } else if (updatedContext.service_id) {
           // Service resolved this turn → advance to orchestrator (will go to collecting_data or slots)
-          const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
+          const orchestration = await runBookingOrchestration(updatedContext, 'legacy_collecting_service_blocked');
           updatedContext = await updateContext(conversationId, {
             ...orchestration.context_updates,
             current_intent: 'BOOKING_NEW',
@@ -3207,7 +3300,7 @@ serve(async (req) => {
             // Customer data/reason requirements are collected before availability generation.
           } else {
             // Service already resolved from extraction → go straight to orchestration
-            const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
+            const orchestration = await runBookingOrchestration(updatedContext, 'idle_service_resolved');
             updatedContext = await updateContext(conversationId, {
               ...orchestration.context_updates,
               current_intent: 'BOOKING_NEW',
@@ -3252,7 +3345,7 @@ serve(async (req) => {
             state: 'collecting_data' as const,
             current_intent: 'BOOKING_NEW' as const,
           };
-          const orchestration = await orchestrateBooking(preOrchestrationContext, empresaId, requirePhone, requireReason, timezone);
+          const orchestration = await runBookingOrchestration(preOrchestrationContext, 'legacy_collecting_data_blocked');
           updatedContext = await updateContext(conversationId, {
             ...orchestration.context_updates,
             current_intent: 'BOOKING_NEW',
@@ -3307,7 +3400,7 @@ serve(async (req) => {
           state: nextState,
           current_intent: 'BOOKING_NEW',
         }, updatedContext.context_version);
-        const orchestration = await orchestrateBooking(updatedContext, empresaId, requirePhone, requireReason, timezone);
+        const orchestration = await runBookingOrchestration(updatedContext, 'generic_fallback_blocked');
         updatedContext = await updateContext(conversationId, {
           ...orchestration.context_updates,
           current_intent: 'BOOKING_NEW',

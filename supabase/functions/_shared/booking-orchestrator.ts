@@ -2,6 +2,7 @@ import { ConversationContext, SlotSuggestion } from './types.ts';
 import { getMissingFields } from './entity-extractor.ts';
 import { checkAvailability, findNextAvailableDays } from './availability-engine.ts';
 import { LIMITS } from './constants.ts';
+import { logAgentEvent } from './logger.ts';
 
 interface OrchestratorResult {
   context_updates: Partial<ConversationContext>;
@@ -31,6 +32,11 @@ interface TimeSlotCandidate {
   futureDistance: number | null;
 }
 
+interface OrchestrationObservability {
+  conversation_id?: string | null;
+  decision_action?: string | null;
+}
+
 const REASONABLE_TIME_MATCH_WINDOW_MINUTES = 120;
 
 // Groups personal fields together for natural collection
@@ -44,19 +50,64 @@ export async function orchestrateBooking(
   empresaId: string,
   requirePhone: boolean,
   requireReason: boolean,
-  timezone: string
+  timezone: string,
+  observability: OrchestrationObservability = {},
 ): Promise<OrchestratorResult> {
+  const emitOrchestrationEvent = (
+    eventType: string,
+    extras: Record<string, unknown> = {},
+  ): void => {
+    if (!observability.conversation_id) return;
+    void logAgentEvent(
+      eventType,
+      {
+        conversation_id: observability.conversation_id,
+        state: context.state ?? null,
+        current_intent: context.current_intent ?? null,
+        service_id: context.service_id ?? null,
+        selected_slot: context.selected_slot
+          ? {
+            start: context.selected_slot.start ?? null,
+            end: context.selected_slot.end ?? null,
+            resource_id: context.selected_slot.resource_id ?? null,
+          }
+          : null,
+        required_fields_missing: context.fields_missing ?? null,
+        decision_action: observability.decision_action ?? null,
+        preferred_date: context.preferred_date ?? null,
+        preferred_time: context.preferred_time ?? null,
+        ...extras,
+      },
+      observability.conversation_id,
+    );
+  };
+  const finish = (result: OrchestratorResult): OrchestratorResult => {
+    emitOrchestrationEvent('FLOW_ORCHESTRATION_DECISION', {
+      action: result.action,
+      response_hint: result.response_hint,
+      proposed_state: result.context_updates.state ?? null,
+      slots_count: result.slots?.length ?? result.context_updates.available_slots?.length ?? 0,
+      required_fields_missing: result.context_updates.fields_missing ?? context.fields_missing ?? null,
+    });
+    return result;
+  };
 
   const missing = getMissingFields(context, requirePhone, requireReason);
+  emitOrchestrationEvent('FLOW_ORCHESTRATION_START', {
+    require_phone: requirePhone,
+    require_reason: requireReason,
+    required_fields_missing: missing,
+    timezone,
+  });
 
   if (missing.length > 0) {
     // Service not yet identified — ask first
     if (missing.includes('service_id')) {
-      return {
+      return finish({
         context_updates: { state: 'collecting_data', fields_missing: missing },
         action: 'ASK_SERVICE',
         response_hint: 'Identifica o serviço que o utilizador pretende agendar e pergunta de forma natural qual o serviço.',
-      };
+      });
     }
 
     // Group personal fields — ask all at once
@@ -73,11 +124,11 @@ export async function orchestrateBooking(
       if (needsPhone) parts.push('número de telefone');
       hint += `Por favor indica o teu ${parts.join(', ')} 😊`;
 
-      return {
+      return finish({
         context_updates: { state: 'collecting_data', fields_missing: missing },
         action: 'ASK_PERSONAL_DATA',
         response_hint: hint,
-      };
+      });
     }
 
     // Only date missing — proactively suggest next available slots
@@ -87,7 +138,7 @@ export async function orchestrateBooking(
       const proactiveSlots = nextDays.flatMap(d => d.slots.slice(0, 6)).slice(0, 8);
 
       if (proactiveSlots.length > 0) {
-        return {
+        return finish({
           context_updates: {
             state: 'awaiting_slot_selection',
             available_slots: proactiveSlots,
@@ -97,14 +148,14 @@ export async function orchestrateBooking(
           action: 'PROACTIVE_SLOTS',
           response_hint: 'O utilizador não indicou data. Sugere os próximos horários disponíveis de forma proactiva e simpática.',
           slots: proactiveSlots,
-        };
+        });
       }
 
-      return {
+      return finish({
         context_updates: { state: 'collecting_data', fields_missing: missing },
         action: 'ASK_DATE',
         response_hint: 'Pergunta de forma natural para que data e hora pretende o agendamento.',
-      };
+      });
     }
   }
 
@@ -115,12 +166,12 @@ export async function orchestrateBooking(
       (context.slots_generated_for_date === context.preferred_date ||
        context.slots_generated_for_date === 'proactive')
     ) {
-      return {
+      return finish({
         context_updates: { state: 'awaiting_slot_selection' },
         action: 'SHOW_EXISTING_SLOTS',
         response_hint: 'Estes são os horários disponíveis. Apresenta-os de forma simpática e pede ao utilizador para escolher.',
         slots: context.available_slots,
-      };
+      });
     }
 
     const availability = await checkAvailability({
@@ -135,7 +186,7 @@ export async function orchestrateBooking(
       const slots = availability.slots.slice(0, 8);
 
       if (slots.length === 1) {
-        return {
+        return finish({
           context_updates: {
             state: 'awaiting_confirmation',
             available_slots: slots,
@@ -145,10 +196,10 @@ export async function orchestrateBooking(
           action: 'SINGLE_SLOT_CONFIRM',
           response_hint: `Só temos um horário disponível: ${slots[0].display_label}. Pergunta de forma natural se confirma.`,
           slots,
-        };
+        });
       }
 
-      return {
+      return finish({
         context_updates: {
           state: 'awaiting_slot_selection',
           available_slots: slots,
@@ -158,7 +209,7 @@ export async function orchestrateBooking(
         action: 'SHOW_SLOTS',
         response_hint: 'Apresenta os horários disponíveis de forma simpática. Diz que são os horários disponíveis para essa data e pede para escolher.',
         slots,
-      };
+      });
     }
 
     const tomorrow = new Date(context.preferred_date + 'T12:00:00');
@@ -175,7 +226,7 @@ export async function orchestrateBooking(
 
     const alternativeSlots = alternatives.flatMap(a => a.slots.slice(0, 2));
 
-    return {
+    return finish({
       context_updates: {
         state: 'awaiting_slot_selection',
         available_slots: alternativeSlots,
@@ -186,14 +237,14 @@ export async function orchestrateBooking(
       action: 'NO_AVAILABILITY_SUGGEST_ALTERNATIVES',
       response_hint: `Informa de forma empática que não há disponibilidade para a data pedida. Apresenta as próximas datas disponíveis e pede para escolher.`,
       slots: alternativeSlots,
-    };
+    });
   }
 
-  return {
+  return finish({
     context_updates: { state: 'collecting_data' },
     action: 'MISSING_DATE_OR_SERVICE',
     response_hint: 'Pergunta de forma natural para que data pretende o agendamento.',
-  };
+  });
 }
 
 function parseTimeToMinutes(value: string | null): number | null {
