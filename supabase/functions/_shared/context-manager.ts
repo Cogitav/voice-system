@@ -1,6 +1,9 @@
 import { getServiceClient } from './supabase-client.ts';
 import { ConversationContext, ConversationState, ErrorState, CorrectionType } from './types.ts';
 import { CONTEXT_RESET_RULES } from './constants.ts';
+import { logAgentEvent } from './logger.ts';
+
+type SupabaseClient = ReturnType<typeof getServiceClient>;
 
 export function createEmptyContext(): ConversationContext {
   return {
@@ -119,7 +122,54 @@ export async function updateContext(
 
   if (error) throw new Error(`Failed to update context: ${error.message}`);
 
+  if (current.state && newContext.state && current.state !== newContext.state) {
+    logCommittedStateTransition(db, conversationId, current, newContext);
+  }
+
   return newContext;
+}
+
+function logCommittedStateTransition(
+  db: SupabaseClient,
+  conversationId: string,
+  previousContext: ConversationContext,
+  nextContext: ConversationContext,
+): void {
+  const write = async () => {
+    try {
+      const { data } = await db
+        .from('conversations')
+        .select('empresa_id')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+      await logAgentEvent(
+        'STATE_CHANGED',
+        {
+          conversation_id: conversationId,
+          empresa_id: data?.empresa_id ?? null,
+          agent_id: null,
+          previous_state: previousContext.state,
+          next_state: nextContext.state,
+          decision_action: null,
+          current_intent: nextContext.current_intent ?? null,
+          source: 'context-manager/updateContext',
+          context_version_before: previousContext.context_version,
+          context_version_after: nextContext.context_version,
+          created_at: new Date().toISOString(),
+        },
+        conversationId,
+      );
+    } catch (error) {
+      console.error('[STATE_CHANGE_LOG_FAILED]', error);
+    }
+  };
+
+  const task = write();
+  const runtime = globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+  };
+  runtime.EdgeRuntime?.waitUntil?.(task);
 }
 
 export async function setConversationState(

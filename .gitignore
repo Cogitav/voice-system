@@ -1,2 +1,6 @@
 # Local Supabase and Deno validation artifacts
 supabase/.temp/
+
+# Dependency/build artifacts
+node_modules/
+dist/

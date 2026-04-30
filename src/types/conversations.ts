@@ -53,3 +53,39 @@ export interface ConversationFilters {
   empresaId?: string;
   search?: string;
 }
+
+export type TimelineEventType =
+  | 'message_client'
+  | 'message_ai'
+  | 'message_human'
+  | 'agent_log'
+  | 'agent_action'
+  | 'state_change'
+  | 'credit_event'
+  | 'error'
+  | 'fallback'
+  | 'handoff';
+
+export type TimelineOutcome = 'success' | 'failed' | 'blocked';
+
+export interface TimelineEvent {
+  id: string;
+  timestamp: string;
+  type: TimelineEventType;
+  source: string;
+  title: string;
+  description?: string;
+  outcome?: TimelineOutcome;
+  credits?: number;
+  metadata?: Record<string, any>;
+}
+
+export type TimelineFilter =
+  | 'all'
+  | 'messages'
+  | 'ai'
+  | 'states'
+  | 'actions'
+  | 'errors'
+  | 'credits'
+  | 'handoff';

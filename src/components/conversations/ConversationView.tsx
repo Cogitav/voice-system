@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConversationStatusBadge } from './ConversationStatusBadge';
 import { ConversationChannelBadge } from './ConversationChannelBadge';
 import { ConversationOwnerBadge } from './ConversationOwnerBadge';
@@ -19,6 +20,7 @@ import { ConversationSummaryCard } from './ConversationSummaryCard';
 import { CloseConversationDialog, type ClosureReason } from './CloseConversationDialog';
 import { OperatorAssistantPanel } from './OperatorAssistantPanel';
 import { TypingIndicator } from './TypingIndicator';
+import { ConversationDebugTimeline } from './ConversationDebugTimeline';
 
 import { useConversation, useMessages, useAssumeConversation, useReturnToAI, useSendMessage } from '@/hooks/useConversations';
 import { useCloseConversationWithSummary } from '@/hooks/useCloseConversation';
@@ -33,7 +35,7 @@ interface ConversationViewProps {
 }
 
 export function ConversationView({ conversationId, onClose }: ConversationViewProps) {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const isMobile = useIsMobile();
   const { data: conversation, isLoading: conversationLoading } = useConversation(conversationId);
   const { data: messages, isLoading: messagesLoading } = useMessages(conversationId);
@@ -49,6 +51,7 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
   const [mobileAssistantOpen, setMobileAssistantOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('messages');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Typing presence for human-to-client indicator
@@ -82,6 +85,7 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
   const canClose = conversation?.status !== 'closed';
   const showAssistant = conversation?.status === 'human_active' && isAssignedToMe;
   const isClosed = conversation?.status === 'closed';
+  const showDebugTimeline = isAdmin;
 
   const handleSend = () => {
     if (!newMessage.trim() || !canRespond) return;
@@ -161,6 +165,126 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
       </div>
     );
   }
+
+  const messagesPanel = (
+    <>
+      {/* Messages */}
+      <ScrollArea className="flex-1 p-4 min-h-0" ref={scrollRef}>
+        {messagesLoading ? (
+          <div className="space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <Skeleton key={i} className="h-16 w-3/4" />
+            ))}
+          </div>
+        ) : messages && messages.length > 0 ? (
+          <div className="flex flex-col gap-4">
+            {messages.map((message) => (
+              message.sender_type === 'system' ? (
+                <SystemEventMessage key={message.id} message={message} />
+              ) : (
+                <MessageBubble key={message.id} message={message} />
+              )
+            ))}
+            <TypingIndicator
+              className="pl-2"
+              typingSource="client"
+              visible={isClientTyping}
+              ariaLabel="Utilizador a escrever"
+            />
+          </div>
+        ) : (
+          <div className="flex items-center justify-center h-32 text-muted-foreground">
+            Nenhuma mensagem ainda
+          </div>
+        )}
+      </ScrollArea>
+
+      {/* Mobile AI Assistant - collapsible section */}
+      {isMobile && showAssistant && (
+        <Collapsible open={mobileAssistantOpen} onOpenChange={setMobileAssistantOpen}>
+          <CollapsibleTrigger asChild>
+            <button className="w-full flex items-center justify-between p-3 border-t bg-muted/30 text-sm font-medium">
+              <span className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary" />
+                Assistente IA
+              </span>
+              {mobileAssistantOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="max-h-[40vh] overflow-y-auto">
+              <OperatorAssistantPanel
+                conversationId={conversationId}
+                isOpen={true}
+                onSelectReply={handleSelectReply}
+                onAction={handleAssistantAction}
+              />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
+      {/* Input */}
+      {!isClosed && (
+        <div className="p-3 sm:p-4 border-t flex-shrink-0">
+          {!canRespond ? (
+            <div className="text-center py-3 px-4 rounded-lg bg-muted text-muted-foreground text-sm">
+              {conversation.status === 'ai_active' && (
+                <span className="flex items-center justify-center gap-2">
+                  <Bot className="w-4 h-4" />
+                  A IA estÃ¡ a responder. Assuma a conversa para responder.
+                </span>
+              )}
+              {conversation.status === 'waiting_human' && (
+                <span>Aguardando humano. Clique em "Assumir" para responder.</span>
+              )}
+              {conversation.status === 'human_active' && !isAssignedToMe && (
+                <span>Conversa atendida por outro operador.</span>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="internal-mode"
+                  checked={isInternal}
+                  onCheckedChange={setIsInternal}
+                />
+                <Label htmlFor="internal-mode" className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <Eye className="w-4 h-4" />
+                  <span className="hidden sm:inline">Nota interna (nÃ£o visÃ­vel ao cliente)</span>
+                  <span className="sm:hidden">Nota interna</span>
+                </Label>
+              </div>
+              <div className="flex gap-2">
+                <Textarea
+                  placeholder={isInternal ? "Nota interna..." : "Mensagem..."}
+                  value={newMessage}
+                  onChange={handleMessageChange}
+                  onKeyDown={handleKeyDown}
+                  className="min-h-[60px] sm:min-h-[80px] resize-none flex-1"
+                />
+                <Button
+                  onClick={handleSend}
+                  disabled={!newMessage.trim() || sendMessage.isPending}
+                  className="self-end"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Closed state message */}
+      {isClosed && (
+        <div className="p-4 border-t text-center text-muted-foreground text-sm flex-shrink-0">
+          Esta conversa foi encerrada e estÃ¡ em modo de leitura.
+        </div>
+      )}
+    </>
+  );
 
   return (
     <div className="flex h-full min-h-0">
@@ -262,6 +386,23 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
           </div>
         )}
 
+        {showDebugTimeline ? (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 min-h-0 flex-col">
+            <div className="border-b px-3 pt-3">
+              <TabsList>
+                <TabsTrigger value="messages">Messages</TabsTrigger>
+                <TabsTrigger value="debug">Debug Timeline</TabsTrigger>
+              </TabsList>
+            </div>
+            <TabsContent value="messages" className="mt-0 flex flex-1 min-h-0 flex-col">
+              {messagesPanel}
+            </TabsContent>
+            <TabsContent value="debug" className="mt-0 flex-1 min-h-0">
+              <ConversationDebugTimeline conversationId={conversationId} enabled={activeTab === 'debug'} />
+            </TabsContent>
+          </Tabs>
+        ) : (
+          <>
         {/* Messages */}
         <ScrollArea className="flex-1 p-4 min-h-0" ref={scrollRef}>
           {messagesLoading ? (
@@ -376,6 +517,8 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
           <div className="p-4 border-t text-center text-muted-foreground text-sm flex-shrink-0">
             Esta conversa foi encerrada e está em modo de leitura.
           </div>
+        )}
+          </>
         )}
       </div>
 
