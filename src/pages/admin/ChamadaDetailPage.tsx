@@ -155,12 +155,15 @@ export default function ChamadaDetailPage() {
           </div>
         </div>
 
-        {/* Simulation Notice */}
+        {/* Demo data notice — voice ingestion pipeline is not yet connected. */}
         <Alert>
           <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Chamada simulada / dados de demonstração</AlertTitle>
           <AlertDescription>
-            Esta chamada é uma <strong>simulação</strong> para validação do sistema. 
-            A transcrição e resumo são gerados automaticamente.
+            O pipeline de ingestão de voz e transcrição em tempo real ainda
+            não está ligado. Esta chamada contém apenas metadados (telefone,
+            agente, duração, intenção). Resumo, transcrição e ações do agente
+            ficarão disponíveis quando o pipeline for ativado.
           </AlertDescription>
         </Alert>
 
@@ -272,7 +275,7 @@ export default function ChamadaDetailPage() {
                 ) : (
                   <div className="flex items-center gap-2 text-muted-foreground py-2">
                     <HelpCircle className="h-4 w-4" />
-                    <p className="text-sm italic">Resumo não disponível.</p>
+                    <p className="text-sm italic">Resumo ainda não disponível.</p>
                   </div>
                 )}
               </CardContent>
@@ -302,7 +305,7 @@ export default function ChamadaDetailPage() {
                 ) : (
                   <div className="flex items-center gap-2 text-muted-foreground py-2">
                     <Info className="h-4 w-4" />
-                    <p className="text-sm italic">Nenhuma ação executada.</p>
+                    <p className="text-sm italic">Ações extraídas ainda não disponíveis.</p>
                   </div>
                 )}
               </CardContent>
@@ -318,7 +321,7 @@ export default function ChamadaDetailPage() {
                   Transcrição da Chamada
                 </CardTitle>
                 <CardDescription>
-                  Transcrição completa da conversa (simulada)
+                  Disponível quando o pipeline de transcrição estiver ligado
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -331,7 +334,7 @@ export default function ChamadaDetailPage() {
                 ) : (
                   <div className="flex items-center justify-center gap-2 text-muted-foreground py-12 border rounded-lg border-dashed bg-muted/20">
                     <FileText className="h-5 w-5" />
-                    <p className="text-sm">Transcrição não disponível.</p>
+                    <p className="text-sm">Transcrição ainda não disponível.</p>
                   </div>
                 )}
               </CardContent>

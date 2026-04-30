@@ -24,7 +24,8 @@ interface EmailFollowUpSectionProps {
   clienteTelefone: string;
   clienteNome?: string;
   empresaNome: string;
-  resumo: string;
+  // Null until the voice ingestion pipeline produces a real summary.
+  resumo: string | null;
 }
 
 // Intent-based defaults
@@ -123,7 +124,10 @@ export function EmailFollowUpSection({
     return text
       .replace(/\{\{cliente_nome\}\}/g, clienteNome || 'Cliente')
       .replace(/\{\{empresa_nome\}\}/g, empresaNome)
-      .replace(/\{\{resumo_chamada\}\}/g, resumo)
+      // Empty string until a real summary is produced by the ingestion pipeline.
+      // Templates that use {{resumo_chamada}} will render with no summary text;
+      // never substitute synthetic content here.
+      .replace(/\{\{resumo_chamada\}\}/g, resumo ?? '')
       .replace(/\{\{data_agendamento\}\}/g, '-')
       .replace(/\{\{hora_agendamento\}\}/g, '-');
   };
