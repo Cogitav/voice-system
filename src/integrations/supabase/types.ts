@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "14.4"
   }
   public: {
     Tables: {
@@ -48,6 +48,7 @@ export type Database = {
         Row: {
           agente_id: string | null
           chamada_id: string | null
+          cliente_email: string | null
           cliente_nome: string | null
           cliente_telefone: string | null
           created_at: string
@@ -73,6 +74,7 @@ export type Database = {
         Insert: {
           agente_id?: string | null
           chamada_id?: string | null
+          cliente_email?: string | null
           cliente_nome?: string | null
           cliente_telefone?: string | null
           created_at?: string
@@ -98,6 +100,7 @@ export type Database = {
         Update: {
           agente_id?: string | null
           chamada_id?: string | null
+          cliente_email?: string | null
           cliente_nome?: string | null
           cliente_telefone?: string | null
           created_at?: string
@@ -278,6 +281,38 @@ export type Database = {
             columns: ["empresa_id"]
             isOneToOne: false
             referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_logs: {
+        Row: {
+          conversation_id: string | null
+          created_at: string
+          event_type: string
+          id: string
+          payload: Json
+        }
+        Insert: {
+          conversation_id?: string | null
+          created_at?: string
+          event_type: string
+          id?: string
+          payload?: Json
+        }
+        Update: {
+          conversation_id?: string | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          payload?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_logs_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
             referencedColumns: ["id"]
           },
         ]
@@ -755,6 +790,8 @@ export type Database = {
           closed_by: string | null
           closure_note: string | null
           closure_reason: string | null
+          consecutive_error_count: number | null
+          context_version: number | null
           conversation_context: Json
           conversation_state: string
           created_at: string
@@ -779,6 +816,8 @@ export type Database = {
           closed_by?: string | null
           closure_note?: string | null
           closure_reason?: string | null
+          consecutive_error_count?: number | null
+          context_version?: number | null
           conversation_context?: Json
           conversation_state?: string
           created_at?: string
@@ -803,6 +842,8 @@ export type Database = {
           closed_by?: string | null
           closure_note?: string | null
           closure_reason?: string | null
+          consecutive_error_count?: number | null
+          context_version?: number | null
           conversation_context?: Json
           conversation_state?: string
           created_at?: string
@@ -1765,7 +1806,7 @@ export type Database = {
           created_at: string
           currency: string | null
           description: string | null
-          duration_minutes: number
+          duration_minutes: number | null
           empresa_id: string
           id: string
           name: string
@@ -1786,7 +1827,7 @@ export type Database = {
           created_at?: string
           currency?: string | null
           description?: string | null
-          duration_minutes: number
+          duration_minutes?: number | null
           empresa_id: string
           id?: string
           name: string
@@ -1807,7 +1848,7 @@ export type Database = {
           created_at?: string
           currency?: string | null
           description?: string | null
-          duration_minutes?: number
+          duration_minutes?: number | null
           empresa_id?: string
           id?: string
           name?: string
@@ -2089,6 +2130,7 @@ export type Database = {
         }[]
       }
       get_user_empresa_id: { Args: { _user_id: string }; Returns: string }
+      get_user_role: { Args: { user_id_input: string }; Returns: string }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
