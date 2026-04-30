@@ -48,12 +48,22 @@ serve(async (req) => {
       );
     }
 
-    // 🔥 CHECK ADMIN (TEMPORÁRIO)
-    const ADMIN_EMAIL = "agentesvirtuais.ai@gmail.com";
+    // 🔥 CHECK ADMIN — server-side role resolution via SECURITY DEFINER RPC
+    // Mirrors the pattern used by manage-ai-provider; relies on user_roles table,
+    // never on client-supplied claims. RPC runs under the user's JWT.
+    const { data: roleData, error: roleLookupError } = await supabaseUser.rpc('get_current_user_role');
 
-    if (user.email !== ADMIN_EMAIL) {
+    if (roleLookupError) {
+      console.error("ROLE LOOKUP ERROR:", roleLookupError);
       return new Response(
-        JSON.stringify({ error: 'Sem permissões' }),
+        JSON.stringify({ error: 'Não foi possível verificar permissões' }),
+        { status: 500, headers: corsHeaders }
+      );
+    }
+
+    if (roleData !== 'admin') {
+      return new Response(
+        JSON.stringify({ error: 'Apenas administradores podem criar utilizadores' }),
         { status: 403, headers: corsHeaders }
       );
     }
