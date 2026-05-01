@@ -55,15 +55,16 @@ function getIntentLabel(intent?: string | null) {
     RESCHEDULE: 'Remarcação',
     CANCEL: 'Cancelamento',
     HUMAN_REQUEST: 'Atendimento humano',
-    CONFIRMATION: 'Confirmação',
-    SLOT_SELECTION: 'Escolha de horário',
-    TIME_BASED_SELECTION: 'Escolha de horário',
-    DATE_CHANGE: 'Alteração de data',
-    CORRECTION: 'Correção',
-    EXPLICIT_RESTART: 'Reinício',
-    OFF_TOPIC: 'Fora de contexto',
+    CONFIRMATION: 'Marcação',
+    SLOT_SELECTION: 'Marcação',
+    TIME_BASED_SELECTION: 'Marcação',
+    DATE_CHANGE: 'Marcação',
+    CORRECTION: 'Marcação',
+    EXPLICIT_RESTART: 'Outro',
+    OFF_TOPIC: 'Outro',
     UNCLEAR: 'Outro',
     UNKNOWN: 'Outro',
+    OTHER: 'Outro',
     Agendamento: 'Marcação',
     Cancelamento: 'Cancelamento',
     'Atendimento humano': 'Atendimento humano',
@@ -87,18 +88,14 @@ function getIntentLabel(intent?: string | null) {
     case 'HUMAN_REQUEST':
       return 'Atendimento humano';
     case 'CONFIRMATION':
-      return 'Confirmação';
     case 'SLOT_SELECTION':
     case 'TIME_BASED_SELECTION':
-      return 'Escolha de horário';
     case 'DATE_CHANGE':
-      return 'Alteração de data';
     case 'CORRECTION':
-      return 'Correção';
+      return 'Marcação';
     case 'EXPLICIT_RESTART':
-      return 'Reinício';
     case 'OFF_TOPIC':
-      return 'Fora de contexto';
+    case 'OTHER':
     case 'UNCLEAR':
     case 'UNKNOWN':
     default:
