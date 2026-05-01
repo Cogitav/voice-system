@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { MessageSquare, ArrowLeft } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { PageLayout } from '@/components/layout/PageLayout';
@@ -13,14 +14,33 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import type { Conversation, ConversationFilters as Filters } from '@/types/conversations';
 
 export default function ConversationsPage() {
+  const { conversationId } = useParams();
+  const navigate = useNavigate();
   const [filters, setFilters] = useState<Filters>({ status: 'all', channel: 'all', owner: 'all' });
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const isMobile = useIsMobile();
   
   const { data: conversations, isLoading } = useConversations(filters);
+  const selectedConversationId = selectedConversation?.id ?? conversationId ?? null;
+
+  useEffect(() => {
+    if (!conversationId || !conversations) return;
+    const found = conversations.find((conversation) => conversation.id === conversationId);
+    if (found) setSelectedConversation(found);
+  }, [conversationId, conversations]);
+
+  const handleSelectConversation = (conversation: Conversation) => {
+    setSelectedConversation(conversation);
+    navigate(`/admin/conversas/${conversation.id}`);
+  };
+
+  const handleCloseConversationView = () => {
+    setSelectedConversation(null);
+    navigate('/admin/conversas');
+  };
 
   // Mobile: full-screen conversation view
-  if (isMobile && selectedConversation) {
+  if (isMobile && selectedConversationId) {
     return (
       <AppShell>
         <div className="flex flex-col h-[calc(100dvh-3.5rem)]">
@@ -28,7 +48,7 @@ export default function ConversationsPage() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setSelectedConversation(null)}
+              onClick={handleCloseConversationView}
             >
               <ArrowLeft className="w-5 h-5" />
             </Button>
@@ -36,8 +56,8 @@ export default function ConversationsPage() {
           </div>
           <div className="flex-1 min-h-0">
             <ConversationView 
-              conversationId={selectedConversation.id}
-              onClose={() => setSelectedConversation(null)}
+              conversationId={selectedConversationId}
+              onClose={handleCloseConversationView}
             />
           </div>
         </div>
@@ -61,18 +81,18 @@ export default function ConversationsPage() {
               <ConversationFilters filters={filters} onChange={setFilters} />
               <ConversationsList
                 conversations={conversations || []}
-                selectedId={selectedConversation?.id}
-                onSelect={setSelectedConversation}
+                selectedId={selectedConversationId ?? undefined}
+                onSelect={handleSelectConversation}
                 isLoading={isLoading}
                 showEmpresa
               />
             </Card>
 
             <Card className="hidden lg:flex flex-col overflow-hidden min-h-0">
-              {selectedConversation ? (
+              {selectedConversationId ? (
                 <ConversationView 
-                  conversationId={selectedConversation.id}
-                  onClose={() => setSelectedConversation(null)}
+                  conversationId={selectedConversationId}
+                  onClose={handleCloseConversationView}
                 />
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-muted-foreground">

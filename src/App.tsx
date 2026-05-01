@@ -30,6 +30,7 @@ import AdminRelatoriosPage from "./pages/admin/RelatoriosPage";
 import AdminConversationReportsPage from "./pages/admin/ConversationReportsPage";
 import CreditsUsagePage from "./pages/CreditsUsagePage";
 import AdminConversationsPage from "./pages/admin/ConversationsPage";
+import LeadsPage from "./pages/admin/LeadsPage";
 import WidgetsPage from "./pages/admin/WidgetsPage";
 import MaintenancePage from "./pages/admin/MaintenancePage";
 import ClienteDashboard from "./pages/cliente/ClienteDashboard";
@@ -199,6 +200,22 @@ const App = () => (
               element={
                 <ProtectedRoute requiredRole="admin">
                   <AdminConversationsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/conversas/:conversationId"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <AdminConversationsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/leads"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <LeadsPage />
                 </ProtectedRoute>
               }
             />

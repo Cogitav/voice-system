@@ -19,6 +19,7 @@ import {
   MessageSquare,
   Code2,
   Wrench,
+  UserPlus,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -33,6 +34,7 @@ const adminNavItems = [
   { to: '/admin/conhecimento', icon: BookOpen, label: 'Conhecimento' },
   { to: '/admin/widgets', icon: Code2, label: 'Widgets' },
   { to: '/admin/conversas', icon: MessageSquare, label: 'Conversas' },
+  { to: '/admin/leads', icon: UserPlus, label: 'Leads' },
   { to: '/admin/chamadas', icon: Phone, label: 'Chamadas' },
   { to: '/admin/agendamentos', icon: Calendar, label: 'Agendamentos' },
   { to: '/admin/calendar', icon: CalendarDays, label: 'Calendário' },

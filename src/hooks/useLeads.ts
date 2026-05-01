@@ -19,6 +19,7 @@ export interface Lead {
   // Joined data
   empresas?: { nome: string } | null;
   agentes?: { nome: string } | null;
+  conversations?: { main_intent: string | null; channel: string | null } | null;
 }
 
 interface UseLeadsParams {
@@ -39,7 +40,8 @@ export function useLeads(params: UseLeadsParams = {}) {
         .select(`
           *,
           empresas:empresa_id(nome),
-          agentes:agent_id(nome)
+          agentes:agent_id(nome),
+          conversations:conversation_id(main_intent, channel)
         `)
         .order('created_at', { ascending: false });
 
@@ -68,6 +70,63 @@ export function useLeads(params: UseLeadsParams = {}) {
       }
 
       return data as Lead[];
+    },
+  });
+}
+
+export function useLeadByConversation(conversationId: string | undefined) {
+  return useQuery({
+    queryKey: ['lead-by-conversation', conversationId],
+    queryFn: async () => {
+      if (!conversationId) return null;
+
+      const { data, error } = await supabase
+        .from('leads')
+        .select('id, status, conversation_id')
+        .eq('conversation_id', conversationId)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data as Pick<Lead, 'id' | 'status' | 'conversation_id'> | null;
+    },
+    enabled: !!conversationId,
+  });
+}
+
+export function useCreateLead() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (lead: {
+      empresa_id: string;
+      conversation_id?: string | null;
+      name?: string | null;
+      email?: string | null;
+      phone?: string | null;
+      source?: string | null;
+      notes?: string | null;
+    }) => {
+      const { error } = await supabase.from('leads').insert({
+        empresa_id: lead.empresa_id,
+        conversation_id: lead.conversation_id ?? null,
+        name: lead.name ?? null,
+        email: lead.email ?? null,
+        phone: lead.phone ?? null,
+        source: lead.source ?? 'chat',
+        notes: lead.notes ?? null,
+        status: 'new',
+      });
+
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['lead-by-conversation', variables.conversation_id] });
+      toast.success('Lead criado');
+    },
+    onError: (error) => {
+      console.error('Error creating lead:', error);
+      toast.error('Erro ao criar lead');
     },
   });
 }

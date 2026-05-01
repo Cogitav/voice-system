@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
-import { Send, Bot, User, ArrowLeftRight, X, Eye, Sparkles, PanelRightClose, ChevronDown, ChevronUp } from 'lucide-react';
+import { Send, Bot, User, ArrowLeftRight, X, Eye, Sparkles, PanelRightClose, ChevronDown, ChevronUp, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -24,6 +25,7 @@ import { ConversationDebugTimeline } from './ConversationDebugTimeline';
 
 import { useConversation, useMessages, useAssumeConversation, useReturnToAI, useSendMessage } from '@/hooks/useConversations';
 import { useCloseConversationWithSummary } from '@/hooks/useCloseConversation';
+import { useCreateLead, useLeadByConversation } from '@/hooks/useLeads';
 import { useInsertSystemMessage } from '@/hooks/useSystemMessages';
 import { useTypingPresence } from '@/hooks/useTypingPresence';
 import { useAuth } from '@/contexts/AuthContext';
@@ -44,6 +46,8 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
   const returnToAI = useReturnToAI();
   const closeConversation = useCloseConversationWithSummary();
   const sendMessage = useSendMessage();
+  const createLead = useCreateLead();
+  const { data: existingLead } = useLeadByConversation(isAdmin ? conversationId : undefined);
   const insertSystemMessage = useInsertSystemMessage();
 
   const [newMessage, setNewMessage] = useState('');
@@ -86,6 +90,13 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
   const showAssistant = conversation?.status === 'human_active' && isAssignedToMe;
   const isClosed = conversation?.status === 'closed';
   const showDebugTimeline = isAdmin;
+
+  const getContextValue = (key: string): string | null => {
+    const context = conversation?.conversation_context;
+    if (!context || typeof context !== 'object') return null;
+    const value = (context as Record<string, unknown>)[key];
+    return typeof value === 'string' && value.trim().length > 0 ? value : null;
+  };
 
   const handleSend = () => {
     if (!newMessage.trim() || !canRespond) return;
@@ -147,6 +158,21 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
     } else if (action.toLowerCase().includes('encerrar') || action.toLowerCase().includes('fechar')) {
       setIsCloseDialogOpen(true);
     }
+  };
+
+  const handleCreateLead = () => {
+    if (!conversation || existingLead) return;
+
+    const intent = conversation.main_intent ?? getContextValue('current_intent');
+    createLead.mutate({
+      empresa_id: conversation.empresa_id,
+      conversation_id: conversation.id,
+      name: getContextValue('customer_name') ?? conversation.client_name,
+      email: getContextValue('customer_email'),
+      phone: getContextValue('customer_phone'),
+      source: conversation.channel === 'voice' ? 'voice' : 'chat',
+      notes: intent ? `Intent: ${intent}` : null,
+    });
   };
 
   if (conversationLoading) {
@@ -342,6 +368,23 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
         {/* Actions */}
         {!isClosed && (
           <div className="flex items-center gap-2 p-3 border-b bg-muted/30 flex-shrink-0 flex-wrap">
+            {isAdmin && (
+              existingLead ? (
+                <Badge variant="secondary" className="h-9 px-3">
+                  Lead criado
+                </Badge>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCreateLead}
+                  disabled={createLead.isPending}
+                >
+                  <UserPlus className="w-4 h-4 mr-1.5" />
+                  Criar lead
+                </Button>
+              )
+            )}
             {canAssume && (
               <Button
                 size="sm"
