@@ -4,6 +4,7 @@ import { checkAvailability } from './availability-engine.ts';
 import { consumeCredits } from './credit-manager.ts';
 import { log, logAction, logAgentEvent } from './logger.ts';
 import { guardBookingExecution } from './guardrails.ts';
+import { qualifyLeadAfterBooking } from './lead-manager.ts';
 import { randomUUID } from 'https://deno.land/std@0.177.0/node/crypto.ts';
 
 type BookingInsertError = {
@@ -391,6 +392,8 @@ export async function executeBooking(
     });
     return { success: false, agendamento_id: null, error: 'Erro ao criar agendamento.', error_code: 'DB_ERROR' };
   }
+
+  await qualifyLeadAfterBooking(conversationId, booking.id);
 
   // Insert booking lifecycle
   await db.from('booking_lifecycle').insert({
