@@ -116,14 +116,22 @@ export function AgentesTable({ agentes, isLoading, onEdit, onToggleStatus, onAdd
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => navigate(`${basePath}/agentes/${agente.id}`)}
-                      title="Ver detalhes"
-                    >
-                      <Eye className="h-4 w-4" />
-                    </Button>
+                    {/* Detail navigation is admin-only because /cliente/agentes/:id
+                        is not registered in the router. Showing this button to
+                        non-admins (coordenador / assistente / cliente_normal)
+                        would route to a 404.
+                        TODO: Client/coordinator read-only agent detail route
+                              can be added later if needed. */}
+                    {isAdmin && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate(`${basePath}/agentes/${agente.id}`)}
+                        title="Ver detalhes"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    )}
                     {showActions && onEdit && (
                       <Button
                         variant="ghost"
