@@ -73,30 +73,6 @@ export default function CreditsUsagePage() {
           </div>
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Info className="w-5 h-5 text-primary" />
-            O que são créditos?
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-muted-foreground leading-relaxed">
-            Os créditos são uma forma simples de medir como os serviços de IA da plataforma são utilizados. 
-            Cada ação consome uma pequena quantidade de créditos, ajudando-o a compreender e controlar a utilização.
-          </p>
-          <div className="flex items-start gap-3 p-4 bg-primary/5 rounded-lg border border-primary/10">
-            <Zap className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-medium text-foreground">Transparência e previsibilidade</p>
-              <p className="text-sm text-muted-foreground">
-                O sistema de créditos foi desenhado para ser claro e previsível. 
-                Pode sempre ver a utilização no seu painel e ajustar conforme necessário.
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* What uses credits */}
       <Card>
