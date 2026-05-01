@@ -19,7 +19,11 @@ export interface Lead {
   // Joined data
   empresas?: { nome: string } | null;
   agentes?: { nome: string } | null;
-  conversations?: { main_intent: string | null; channel: string | null } | null;
+  conversations?: {
+    main_intent: string | null;
+    channel: string | null;
+    conversation_context: Record<string, unknown> | null;
+  } | null;
 }
 
 interface UseLeadsParams {
@@ -41,7 +45,7 @@ export function useLeads(params: UseLeadsParams = {}) {
           *,
           empresas:empresa_id(nome),
           agentes:agent_id(nome),
-          conversations:conversation_id(main_intent, channel)
+          conversations:conversation_id(main_intent, channel, conversation_context)
         `)
         .order('created_at', { ascending: false });
 

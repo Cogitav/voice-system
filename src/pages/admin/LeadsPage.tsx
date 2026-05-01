@@ -36,7 +36,43 @@ function getLeadPriority(lead: Lead): { value: 'high' | 'medium' | 'low'; label:
   return { value: 'low', label: 'Baixa' };
 }
 
+function getLeadIntentSource(lead: Lead) {
+  const context = lead.conversations?.conversation_context;
+  const currentIntent = context && typeof context === 'object'
+    ? context.current_intent
+    : null;
+
+  return typeof currentIntent === 'string' && currentIntent.trim().length > 0
+    ? currentIntent
+    : lead.conversations?.main_intent ?? null;
+}
+
 function getIntentLabel(intent?: string | null) {
+  const labels: Record<string, string> = {
+    BOOKING_NEW: 'Marcação',
+    INFO_REQUEST: 'Informação',
+    PRICE_REQUEST: 'Preço',
+    RESCHEDULE: 'Remarcação',
+    CANCEL: 'Cancelamento',
+    HUMAN_REQUEST: 'Atendimento humano',
+    CONFIRMATION: 'Confirmação',
+    SLOT_SELECTION: 'Escolha de horário',
+    TIME_BASED_SELECTION: 'Escolha de horário',
+    DATE_CHANGE: 'Alteração de data',
+    CORRECTION: 'Correção',
+    EXPLICIT_RESTART: 'Reinício',
+    OFF_TOPIC: 'Fora de contexto',
+    UNCLEAR: 'Outro',
+    UNKNOWN: 'Outro',
+    Agendamento: 'Marcação',
+    Cancelamento: 'Cancelamento',
+    'Atendimento humano': 'Atendimento humano',
+    'Chamada de voz': 'Chamada de voz',
+    'Não determinado': 'Outro',
+  };
+
+  if (intent && labels[intent]) return labels[intent];
+
   switch (intent) {
     case 'BOOKING_NEW':
       return 'Marcação';
@@ -48,6 +84,22 @@ function getIntentLabel(intent?: string | null) {
       return 'Remarcação';
     case 'CANCEL':
       return 'Cancelamento';
+    case 'HUMAN_REQUEST':
+      return 'Atendimento humano';
+    case 'CONFIRMATION':
+      return 'Confirmação';
+    case 'SLOT_SELECTION':
+    case 'TIME_BASED_SELECTION':
+      return 'Escolha de horário';
+    case 'DATE_CHANGE':
+      return 'Alteração de data';
+    case 'CORRECTION':
+      return 'Correção';
+    case 'EXPLICIT_RESTART':
+      return 'Reinício';
+    case 'OFF_TOPIC':
+      return 'Fora de contexto';
+    case 'UNCLEAR':
     case 'UNKNOWN':
     default:
       return 'Outro';
@@ -131,7 +183,7 @@ export default function LeadsPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline">{getIntentLabel(lead.conversations?.main_intent)}</Badge>
+                          <Badge variant="outline">{getIntentLabel(getLeadIntentSource(lead))}</Badge>
                         </TableCell>
                         <TableCell className="min-w-40">
                           <Select
