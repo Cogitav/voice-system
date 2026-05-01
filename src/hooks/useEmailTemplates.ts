@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
 export interface EmailTemplate {
@@ -145,10 +146,13 @@ export function useCreateEmailTemplate() {
 
 export function useUpdateEmailTemplate() {
   const queryClient = useQueryClient();
+  const { isAdmin, profile } = useAuth();
+  const userEmpresaId = profile?.empresa_id;
 
   return useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<EmailTemplateFormData> }) => {
-      const { data: template, error } = await supabase
+      // Defense-in-depth: non-admin users can only update templates in their own empresa.
+      let query = supabase
         .from('email_templates')
         .update({
           intent: data.intent,
@@ -157,9 +161,13 @@ export function useUpdateEmailTemplate() {
           is_active: data.is_active,
           recipient_type: data.recipient_type,
         })
-        .eq('id', id)
-        .select()
-        .single();
+        .eq('id', id);
+
+      if (!isAdmin && userEmpresaId) {
+        query = query.eq('empresa_id', userEmpresaId);
+      }
+
+      const { data: template, error } = await query.select().single();
 
       if (error) {
         throw new Error(error.message);
@@ -179,13 +187,22 @@ export function useUpdateEmailTemplate() {
 
 export function useDeleteEmailTemplate() {
   const queryClient = useQueryClient();
+  const { isAdmin, profile } = useAuth();
+  const userEmpresaId = profile?.empresa_id;
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      // Defense-in-depth: non-admin users can only delete templates in their own empresa.
+      let query = supabase
         .from('email_templates')
         .delete()
         .eq('id', id);
+
+      if (!isAdmin && userEmpresaId) {
+        query = query.eq('empresa_id', userEmpresaId);
+      }
+
+      const { error } = await query;
 
       if (error) {
         throw new Error(error.message);
@@ -203,13 +220,22 @@ export function useDeleteEmailTemplate() {
 
 export function useToggleEmailTemplate() {
   const queryClient = useQueryClient();
+  const { isAdmin, profile } = useAuth();
+  const userEmpresaId = profile?.empresa_id;
 
   return useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
-      const { error } = await supabase
+      // Defense-in-depth: non-admin users can only toggle templates in their own empresa.
+      let query = supabase
         .from('email_templates')
         .update({ is_active })
         .eq('id', id);
+
+      if (!isAdmin && userEmpresaId) {
+        query = query.eq('empresa_id', userEmpresaId);
+      }
+
+      const { error } = await query;
 
       if (error) {
         throw new Error(error.message);

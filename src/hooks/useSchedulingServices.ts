@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
 export interface SchedulingService {
@@ -80,12 +81,19 @@ export function useCreateSchedulingService(empresaId?: string) {
 
 export function useUpdateSchedulingService(empresaId?: string) {
   const queryClient = useQueryClient();
+  const { isAdmin, profile } = useAuth();
+  const userEmpresaId = profile?.empresa_id;
   return useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<SchedulingServiceFormData> }) => {
-      const { error } = await supabase
+      // Defense-in-depth: non-admin users can only update rows in their own empresa.
+      let query = supabase
         .from('scheduling_services')
         .update(data)
         .eq('id', id);
+      if (!isAdmin && userEmpresaId) {
+        query = query.eq('empresa_id', userEmpresaId);
+      }
+      const { error } = await query;
       if (error) throw error;
     },
     onSuccess: () => {
@@ -100,12 +108,19 @@ export function useUpdateSchedulingService(empresaId?: string) {
 
 export function useDeleteSchedulingService(empresaId?: string) {
   const queryClient = useQueryClient();
+  const { isAdmin, profile } = useAuth();
+  const userEmpresaId = profile?.empresa_id;
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      // Defense-in-depth: non-admin users can only delete rows in their own empresa.
+      let query = supabase
         .from('scheduling_services')
         .delete()
         .eq('id', id);
+      if (!isAdmin && userEmpresaId) {
+        query = query.eq('empresa_id', userEmpresaId);
+      }
+      const { error } = await query;
       if (error) throw error;
     },
     onSuccess: () => {

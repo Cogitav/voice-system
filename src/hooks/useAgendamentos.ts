@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
 export interface Agendamento {
@@ -180,10 +181,15 @@ export function useCreateAgendamento() {
 
 export function useUpdateAgendamento() {
   const queryClient = useQueryClient();
+  const { isAdmin, profile } = useAuth();
+  const userEmpresaId = profile?.empresa_id;
 
   return useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<AgendamentoFormData> }) => {
-      const { data: agendamento, error } = await supabase
+      // Defense-in-depth: non-admin users can only update rows in their own empresa.
+      // RLS enforces this server-side; the explicit filter is a fallback if RLS
+      // regresses. Admins skip the guard (they are allowed cross-empresa).
+      let query = supabase
         .from('agendamentos')
         .update({
           empresa_id: data.empresa_id,
@@ -195,9 +201,13 @@ export function useUpdateAgendamento() {
           cliente_telefone: data.cliente_telefone,
           cliente_nome: data.cliente_nome,
         })
-        .eq('id', id)
-        .select()
-        .single();
+        .eq('id', id);
+
+      if (!isAdmin && userEmpresaId) {
+        query = query.eq('empresa_id', userEmpresaId);
+      }
+
+      const { data: agendamento, error } = await query.select().single();
 
       if (error) {
         throw new Error(error.message);
@@ -217,13 +227,22 @@ export function useUpdateAgendamento() {
 
 export function useDeleteAgendamento() {
   const queryClient = useQueryClient();
+  const { isAdmin, profile } = useAuth();
+  const userEmpresaId = profile?.empresa_id;
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      // Defense-in-depth: see useUpdateAgendamento.
+      let query = supabase
         .from('agendamentos')
         .delete()
         .eq('id', id);
+
+      if (!isAdmin && userEmpresaId) {
+        query = query.eq('empresa_id', userEmpresaId);
+      }
+
+      const { error } = await query;
 
       if (error) {
         throw new Error(error.message);

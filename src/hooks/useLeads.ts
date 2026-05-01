@@ -74,13 +74,22 @@ export function useLeads(params: UseLeadsParams = {}) {
 
 export function useUpdateLeadStatus() {
   const queryClient = useQueryClient();
+  const { isAdmin, profile } = useAuth();
+  const userEmpresaId = profile?.empresa_id;
 
   return useMutation({
     mutationFn: async ({ leadId, status }: { leadId: string; status: Lead['status'] }) => {
-      const { error } = await supabase
+      // Defense-in-depth: non-admin users can only update leads in their own empresa.
+      let query = supabase
         .from('leads')
         .update({ status })
         .eq('id', leadId);
+
+      if (!isAdmin && userEmpresaId) {
+        query = query.eq('empresa_id', userEmpresaId);
+      }
+
+      const { error } = await query;
 
       if (error) throw error;
     },
