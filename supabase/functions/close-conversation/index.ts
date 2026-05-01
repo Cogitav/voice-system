@@ -14,7 +14,11 @@ serve(async (req) => {
   }
 
   try {
-    const { conversation_id, reason, closed_by } = await req.json();
+    const body = await req.json();
+    const conversation_id = body.conversation_id ?? body.conversationId;
+    const reason = body.reason ?? body.closureReason;
+    const closure_note = body.closure_note ?? body.closureNote;
+    const closed_by = body.closed_by ?? body.closedBy;
 
     if (!conversation_id) {
       return new Response(JSON.stringify({ error: 'Missing conversation_id' }), {
@@ -47,6 +51,7 @@ serve(async (req) => {
       closed_at: new Date().toISOString(),
       closed_by: closed_by ?? null,
       closure_reason: reason ?? 'manual',
+      closure_note: closure_note ?? null,
     }).eq('id', conversation_id);
 
     const context = await getContext(conversation_id);
