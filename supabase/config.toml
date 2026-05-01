@@ -40,10 +40,12 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.check-availability]
-verify_jwt = false
+# Deferred Phase 2 endpoint; require JWT until promoted to public API.
+verify_jwt = true
 
 [functions.core-health-check]
 verify_jwt = false
 
 [functions.booking-v2]
-verify_jwt = false
+# Deferred Phase 2 endpoint; require JWT until promoted to public API.
+verify_jwt = true
