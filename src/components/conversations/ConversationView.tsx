@@ -98,6 +98,20 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
     return typeof value === 'string' && value.trim().length > 0 ? value : null;
   };
 
+  const hasConfirmedBooking = (): boolean => {
+    const context = conversation?.conversation_context;
+    if (!context || typeof context !== 'object') return false;
+
+    const contextRecord = context as Record<string, unknown>;
+    const confirmedSnapshot = contextRecord.confirmed_snapshot;
+    const hasConfirmedSnapshot = !!confirmedSnapshot && typeof confirmedSnapshot === 'object';
+
+    return (
+      !!getContextValue('agendamento_id') ||
+      hasConfirmedSnapshot
+    );
+  };
+
   const handleSend = () => {
     if (!newMessage.trim() || !canRespond) return;
     stopTyping();
@@ -172,6 +186,7 @@ export function ConversationView({ conversationId, onClose }: ConversationViewPr
       phone: getContextValue('customer_phone'),
       source: conversation.channel === 'voice' ? 'voice' : 'chat',
       notes: intent ? `Intent: ${intent}` : null,
+      status: hasConfirmedBooking() ? 'qualified' : 'new',
     });
   };
 

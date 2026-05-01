@@ -109,6 +109,7 @@ export function useCreateLead() {
       phone?: string | null;
       source?: string | null;
       notes?: string | null;
+      status?: Lead['status'];
     }) => {
       const { error } = await supabase.from('leads').insert({
         empresa_id: lead.empresa_id,
@@ -118,7 +119,7 @@ export function useCreateLead() {
         phone: lead.phone ?? null,
         source: lead.source ?? 'chat',
         notes: lead.notes ?? null,
-        status: 'new',
+        status: lead.status ?? 'new',
       });
 
       if (error) throw error;
