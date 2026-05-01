@@ -24,6 +24,18 @@ function getContact(lead: Lead) {
   return [lead.phone, lead.email].filter(Boolean).join(' / ') || 'Sem contacto';
 }
 
+function getLeadPriority(lead: Lead): { value: 'high' | 'medium' | 'low'; label: string } {
+  if (lead.email && lead.phone) {
+    return { value: 'high', label: 'Alta' };
+  }
+
+  if (lead.email || lead.phone) {
+    return { value: 'medium', label: 'Média' };
+  }
+
+  return { value: 'low', label: 'Baixa' };
+}
+
 function getIntentLabel(intent?: string | null) {
   switch (intent) {
     case 'BOOKING_NEW':
@@ -94,6 +106,7 @@ export default function LeadsPage() {
                     <TableRow>
                       <TableHead>Nome</TableHead>
                       <TableHead>Contacto</TableHead>
+                      <TableHead>Prioridade</TableHead>
                       <TableHead>Intent</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Source</TableHead>
@@ -102,10 +115,21 @@ export default function LeadsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {leads.map((lead) => (
+                    {leads.map((lead) => {
+                      const priority = getLeadPriority(lead);
+
+                      return (
                       <TableRow key={lead.id}>
                         <TableCell className="font-medium">{lead.name || 'Sem nome'}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{getContact(lead)}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={priority.value === 'high' ? 'default' : 'outline'}
+                            className={priority.value === 'low' ? 'text-muted-foreground' : undefined}
+                          >
+                            {priority.label}
+                          </Badge>
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline">{getIntentLabel(lead.conversations?.main_intent)}</Badge>
                         </TableCell>
@@ -145,7 +169,8 @@ export default function LeadsPage() {
                           </Button>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
