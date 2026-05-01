@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Loader2, Settings } from 'lucide-react';
+import { Save, Loader2, Settings, ChevronDown } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,9 @@ export default function ConfiguracoesPage() {
   
   const [localSettings, setLocalSettings] = useState<Record<string, any>>(DEFAULT_SETTINGS);
   const [hasChanges, setHasChanges] = useState(false);
+  // Debug-level credit events panel is hidden by default — admins opt in
+  // explicitly via the "Advanced Debug" toggle below.
+  const [showAdvancedDebug, setShowAdvancedDebug] = useState(false);
 
   // Sync with loaded data
   useEffect(() => {
@@ -183,11 +186,37 @@ export default function ConfiguracoesPage() {
           <TabsContent value="credits" className="mt-6">
             <div className="space-y-8">
               <AdminCreditsOverview />
-              <AdminCreditsSettings 
+              <AdminCreditsSettings
                 settings={localSettings}
                 onSettingChange={handleSettingChange}
               />
-              <AdminCreditEventsDebug />
+
+              {/* Advanced Debug — hidden by default. Renders the existing
+                  AdminCreditEventsDebug panel only when expanded. The component
+                  itself is unchanged; only its visibility is gated. */}
+              <div className="space-y-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowAdvancedDebug((prev) => !prev)}
+                  aria-expanded={showAdvancedDebug}
+                  aria-controls="admin-credit-events-debug-panel"
+                >
+                  <ChevronDown
+                    className={`mr-1.5 h-4 w-4 transition-transform ${
+                      showAdvancedDebug ? 'rotate-0' : '-rotate-90'
+                    }`}
+                  />
+                  Advanced Debug
+                </Button>
+
+                {showAdvancedDebug && (
+                  <div id="admin-credit-events-debug-panel">
+                    <AdminCreditEventsDebug />
+                  </div>
+                )}
+              </div>
             </div>
           </TabsContent>
 
