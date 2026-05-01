@@ -2,7 +2,8 @@ import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, Users } from 'lucide-react';
+import { Eye, Mail, Users } from 'lucide-react';
+import { toast } from 'sonner';
 import { AppShell } from '@/components/layout/AppShell';
 import { PageLayout } from '@/components/layout/PageLayout';
 import { Badge } from '@/components/ui/badge';
@@ -12,8 +13,10 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ConfirmationDialog } from '@/components/admin/ConfirmationDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeads, useUpdateLeadStatus, type Lead } from '@/hooks/useLeads';
+import { useSendLeadEmail } from '@/hooks/useSendFollowUpEmail';
 
 const LEAD_STATUSES: Array<{ value: Lead['status']; label: string }> = [
   { value: 'new', label: 'Novo' },
@@ -153,6 +156,8 @@ export default function LeadsPage() {
   const { isAdmin } = useAuth();
   const { data: leads = [], isLoading, error } = useLeads();
   const updateLeadStatus = useUpdateLeadStatus();
+  const sendLeadEmail = useSendLeadEmail();
+  const [emailDialogLead, setEmailDialogLead] = useState<Lead | null>(null);
   const [search, setSearch] = useState('');
   const [companyFilter, setCompanyFilter] = useState('all');
   const [dateRange, setDateRange] = useState<DateRangeFilter>('all');
@@ -453,15 +458,27 @@ export default function LeadsPage() {
                           {format(new Date(lead.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: pt })}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={!lead.conversation_id}
-                            onClick={() => lead.conversation_id && navigate(`/admin/conversas/${lead.conversation_id}`)}
-                          >
-                            <Eye className="mr-1.5 h-4 w-4" />
-                            Ver conversa
-                          </Button>
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!lead.email}
+                              onClick={() => setEmailDialogLead(lead)}
+                              title={lead.email ? `Enviar email para ${lead.email}` : 'Lead sem email'}
+                            >
+                              <Mail className="mr-1.5 h-4 w-4" />
+                              Enviar email
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!lead.conversation_id}
+                              onClick={() => lead.conversation_id && navigate(`/admin/conversas/${lead.conversation_id}`)}
+                            >
+                              <Eye className="mr-1.5 h-4 w-4" />
+                              Ver conversa
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                       );
@@ -472,6 +489,48 @@ export default function LeadsPage() {
             </CardContent>
           </Card>
         </div>
+
+        <ConfirmationDialog
+          open={!!emailDialogLead}
+          onOpenChange={(open) => {
+            if (!open) setEmailDialogLead(null);
+          }}
+          title="Enviar email a este lead?"
+          description={
+            emailDialogLead
+              ? `O email vai ser enviado para ${emailDialogLead.email}.\n\n` +
+                `O template é escolhido automaticamente pela intent associada (${getIntentLabel(getLeadIntentSource(emailDialogLead))}). ` +
+                `Se não existir template configurado para esta intent, o envio é cancelado e nada é enviado.`
+              : ''
+          }
+          confirmLabel="Enviar"
+          isLoading={sendLeadEmail.isPending}
+          onConfirm={async () => {
+            if (!emailDialogLead?.email) return;
+            const lead = emailDialogLead;
+            try {
+              await sendLeadEmail.mutateAsync({
+                leadId: lead.id,
+                recipientEmail: lead.email,
+                clienteNome: lead.name ?? undefined,
+              });
+              toast.success(`Email enviado para ${lead.email}`);
+            } catch (err) {
+              const reason = err instanceof Error ? err.message : 'unknown_error';
+              const friendly =
+                reason === 'no_template'
+                  ? 'Não existe um template ativo para a intent deste lead.'
+                  : reason === 'lead_not_found'
+                    ? 'Lead não encontrado.'
+                    : reason === 'email_send_failed'
+                      ? 'Falha ao enviar via Resend.'
+                      : `Falha ao enviar email: ${reason}`;
+              toast.error(friendly);
+            } finally {
+              setEmailDialogLead(null);
+            }
+          }}
+        />
       </PageLayout>
     </AppShell>
   );

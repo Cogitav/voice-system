@@ -154,7 +154,10 @@ const corsHeaders = {
 };
 
 interface SendFollowUpRequest {
-  chamada_id: string;
+  // Provide exactly one of chamada_id (call-context email) or lead_id
+  // (lead-context email). Validated at runtime via XOR check.
+  chamada_id?: string;
+  lead_id?: string;
   recipient_email: string;
   cliente_nome?: string;
 }
@@ -170,15 +173,188 @@ const handler = async (req: Request): Promise<Response> => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
-    const { chamada_id, recipient_email, cliente_nome }: SendFollowUpRequest = await req.json();
+    const { chamada_id, lead_id, recipient_email, cliente_nome }: SendFollowUpRequest = await req.json();
 
-    if (!chamada_id || !recipient_email) {
+    if (!recipient_email) {
       return new Response(
-        JSON.stringify({ error: "chamada_id and recipient_email are required" }),
+        JSON.stringify({ error: "recipient_email is required" }),
         { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
+    const hasChamada = typeof chamada_id === 'string' && chamada_id.length > 0;
+    const hasLead = typeof lead_id === 'string' && lead_id.length > 0;
+
+    // XOR: exactly one source allowed.
+    if (hasChamada === hasLead) {
+      return new Response(
+        JSON.stringify({ error: "exactly one of chamada_id or lead_id must be provided" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    // ─── Lead-context email path ─────────────────────────────────────────────
+    // Mirrors the chamada path below in shape (lookup → template → replace →
+    // send → log → credits) but sources its context from the leads table and
+    // the linked conversation. email_logs.chamada_id is set to NULL for these
+    // rows; lead linkage is preserved via empresa_id + recipient_email + sent_at
+    // (no schema change). Returns early so the chamada path runs unchanged.
+    if (hasLead) {
+      const { data: lead, error: leadError } = await supabase
+        .from("leads")
+        .select(`
+          id,
+          empresa_id,
+          name,
+          email,
+          phone,
+          status,
+          source,
+          conversation_id,
+          empresas:empresa_id (nome),
+          conversations:conversation_id (main_intent, conversation_context)
+        `)
+        .eq("id", lead_id!)
+        .single();
+
+      if (leadError || !lead) {
+        console.log("Lead not found:", lead_id);
+        return new Response(
+          JSON.stringify({ success: false, reason: "lead_not_found" }),
+          { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+
+      const empresaId = lead.empresa_id;
+      const empresaNome = (lead as any).empresas?.nome || "Empresa";
+
+      // Resolve intent: live conversation_context.current_intent →
+      // persisted conversations.main_intent → generic 'lead_followup' fallback.
+      const conv = (lead as any).conversations;
+      const ctxField = conv?.conversation_context;
+      const ctxIntent =
+        ctxField && typeof ctxField === "object" && "current_intent" in ctxField
+          ? (ctxField as Record<string, unknown>).current_intent
+          : null;
+      const intent =
+        typeof ctxIntent === "string" && ctxIntent.trim().length > 0
+          ? ctxIntent
+          : typeof conv?.main_intent === "string" && conv.main_intent.trim().length > 0
+          ? conv.main_intent
+          : "lead_followup";
+
+      // Find active template (same lookup pattern as chamada path).
+      const { data: template, error: templateError } = await supabase
+        .from("email_templates")
+        .select("*")
+        .eq("empresa_id", empresaId)
+        .eq("intent", intent)
+        .eq("is_active", true)
+        .single();
+
+      if (templateError || !template) {
+        console.log("No active template for lead intent:", intent, "empresa:", empresaId);
+        return new Response(
+          JSON.stringify({ success: false, reason: "no_template" }),
+          { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+
+      const leadName = lead.name || cliente_nome || "Cliente";
+
+      let subject = template.subject;
+      let body = template.body;
+
+      const replacements: Record<string, string> = {
+        // Lead-context variables
+        "{{nome_cliente}}": leadName,
+        "{{email_cliente}}": lead.email || recipient_email,
+        "{{telefone_cliente}}": lead.phone || "",
+        "{{lead_status}}": lead.status || "",
+        "{{lead_source}}": lead.source || "",
+        "{{intent}}": intent,
+        // Aliases for templates already using chamada-style variable names
+        "{{cliente_nome}}": leadName,
+        "{{empresa_nome}}": empresaNome,
+        // Call-only variables — empty string when no chamada in scope (per spec).
+        "{{resumo_chamada}}": "",
+        "{{data_agendamento}}": "",
+        "{{hora_agendamento}}": "",
+      };
+
+      for (const [key, value] of Object.entries(replacements)) {
+        subject = subject.replace(new RegExp(key.replace(/[{}]/g, "\\$&"), "g"), value);
+        body = body.replace(new RegExp(key.replace(/[{}]/g, "\\$&"), "g"), value);
+      }
+
+      const emailResult = await sendEmail(
+        recipient_email,
+        `${empresaNome} <onboarding@resend.dev>`,
+        subject,
+        body
+      );
+
+      if (!emailResult.success) {
+        console.error("Failed to send lead email:", emailResult.error);
+
+        // Log failure (no credits consumed). chamada_id intentionally NULL.
+        await supabase.from("email_logs").insert({
+          chamada_id: null,
+          template_id: template.id,
+          empresa_id: empresaId,
+          recipient_email: recipient_email,
+          subject: subject,
+          body: body,
+          status: "failed",
+          error_message: emailResult.error,
+        });
+
+        return new Response(
+          JSON.stringify({ success: false, reason: "email_send_failed", error: emailResult.error }),
+          { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+
+      console.log("Lead email sent successfully:", emailResult.id);
+
+      // Log success. chamada_id intentionally NULL for lead emails.
+      const { data: emailLog } = await supabase
+        .from("email_logs")
+        .insert({
+          chamada_id: null,
+          template_id: template.id,
+          empresa_id: empresaId,
+          recipient_email: recipient_email,
+          subject: subject,
+          body: body,
+          status: "sent",
+          sent_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+
+      if (emailLog?.id) {
+        registerCreditUsage(
+          supabase,
+          empresaId,
+          "email",
+          emailLog.id,
+          {
+            leadId: lead_id,
+            recipientEmail: recipient_email,
+            templateId: template.id,
+            conversationId: lead.conversation_id,
+          }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, email_id: emailResult.id }),
+        { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    // ─── Chamada-context email path (unchanged) ──────────────────────────────
     // Fetch call details
     const { data: chamada, error: chamadaError } = await supabase
       .from("chamadas")
@@ -322,26 +498,43 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     console.error("Error in send-follow-up-email:", error);
 
-    // Try to log the failure
+    // Try to log the failure for whichever context (chamada or lead) was supplied.
     try {
-      const { chamada_id, recipient_email }: Partial<SendFollowUpRequest> = await req.clone().json();
-      if (chamada_id && recipient_email) {
+      const { chamada_id, lead_id, recipient_email }: Partial<SendFollowUpRequest> =
+        await req.clone().json();
+      if (recipient_email) {
+        const hasChamada = typeof chamada_id === "string" && chamada_id.length > 0;
+        const hasLead = typeof lead_id === "string" && lead_id.length > 0;
+
         const supabase = createClient(
           Deno.env.get("SUPABASE_URL")!,
           Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
         );
-        
-        // Get empresa_id from chamada
-        const { data: chamada } = await supabase
-          .from("chamadas")
-          .select("empresa_id")
-          .eq("id", chamada_id)
-          .single();
 
-        if (chamada) {
+        let empresaId: string | null = null;
+        let logChamadaId: string | null = null;
+
+        if (hasChamada) {
+          const { data: chamada } = await supabase
+            .from("chamadas")
+            .select("empresa_id")
+            .eq("id", chamada_id!)
+            .single();
+          empresaId = chamada?.empresa_id ?? null;
+          logChamadaId = chamada_id!;
+        } else if (hasLead) {
+          const { data: lead } = await supabase
+            .from("leads")
+            .select("empresa_id")
+            .eq("id", lead_id!)
+            .single();
+          empresaId = lead?.empresa_id ?? null;
+        }
+
+        if (empresaId) {
           await supabase.from("email_logs").insert({
-            chamada_id: chamada_id,
-            empresa_id: chamada.empresa_id,
+            chamada_id: logChamadaId,
+            empresa_id: empresaId,
             recipient_email: recipient_email,
             subject: "Error",
             body: "",
