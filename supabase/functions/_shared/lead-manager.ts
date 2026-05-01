@@ -8,38 +8,73 @@ export async function createLeadIfEligible(
   agentId: string,
   conversationId: string
 ): Promise<string | null> {
-  if (!context.customer_name && !context.customer_email && !context.customer_phone) {
+  try {
+    if (!context.customer_name && !context.customer_email && !context.customer_phone) {
+      return null;
+    }
+
+    const db = getServiceClient();
+    const hasConfirmedBooking = !!context.agendamento_id || !!context.confirmed_snapshot;
+    const initialStatus = hasConfirmedBooking ? 'qualified' : 'new';
+
+    // Check if lead already exists for this conversation
+    const { data: existing, error: existingError } = await db
+      .from('leads')
+      .select('id, status')
+      .eq('conversation_id', conversationId)
+      .maybeSingle();
+
+    if (existingError) {
+      console.warn('[LEAD_LOOKUP_FAILED]', existingError.message);
+      return null;
+    }
+
+    if (existing) {
+      if (hasConfirmedBooking && ['new', 'contacted'].includes(existing.status)) {
+        const { error: updateError } = await db
+          .from('leads')
+          .update({ status: 'qualified' })
+          .eq('id', existing.id)
+          .in('status', ['new', 'contacted']);
+
+        if (updateError) {
+          console.warn('[LEAD_STATUS_UPDATE_FAILED]', updateError.message);
+        }
+      }
+      return existing.id;
+    }
+
+    const { data: lead, error: insertError } = await db
+      .from('leads')
+      .insert({
+        empresa_id: empresaId,
+        conversation_id: conversationId,
+        agent_id: agentId,
+        name: context.customer_name ?? null,
+        email: context.customer_email ?? null,
+        phone: context.customer_phone ?? null,
+        notes: context.customer_reason ?? null,
+        source: 'chat',
+        status: initialStatus,
+      })
+      .select('id')
+      .single();
+
+    if (insertError) {
+      console.warn('[LEAD_CREATE_FAILED]', insertError.message);
+      return null;
+    }
+
+    return lead?.id ?? null;
+  } catch (error) {
+    console.warn('[LEAD_CREATE_FAILED]', error);
+    void logAgentEvent('LEAD_CREATE_FAILED', {
+      conversation_id: conversationId,
+      empresa_id: empresaId,
+      error_message: error instanceof Error ? error.message : String(error),
+    }, conversationId);
     return null;
   }
-
-  const db = getServiceClient();
-
-  // Check if lead already exists for this conversation
-  const { data: existing } = await db
-    .from('leads')
-    .select('id')
-    .eq('conversation_id', conversationId)
-    .single();
-
-  if (existing) return existing.id;
-
-  const { data: lead } = await db
-    .from('leads')
-    .insert({
-      empresa_id: empresaId,
-      conversation_id: conversationId,
-      agent_id: agentId,
-      name: context.customer_name ?? null,
-      email: context.customer_email ?? null,
-      phone: context.customer_phone ?? null,
-      notes: context.customer_reason ?? null,
-      source: 'chat',
-      status: 'new',
-    })
-    .select('id')
-    .single();
-
-  return lead?.id ?? null;
 }
 
 export async function updateLeadStatus(
