@@ -27,7 +27,7 @@ export const LIMITS = {
   llm_retries: 2,
   booking_suggestions: 5,
   consecutive_errors_before_handoff: 3,
-  idle_conversation_minutes: 30,
+  idle_conversation_minutes: 24 * 60,
   max_slots_per_page: 5,
 } as const;
 

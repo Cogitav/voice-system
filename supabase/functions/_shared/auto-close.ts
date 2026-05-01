@@ -14,20 +14,27 @@
  * Does NOT modify: intent router, booking engine, service resolver.
  */
 
-import { emitPlatformEvent, type PlatformEventType } from './platform-events.ts';
-
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
+
+type PlatformEventType =
+  | 'booking_confirmed'
+  | 'booking_rescheduled'
+  | 'booking_cancelled'
+  | 'conversation_closed'
+  | 'human_handoff_completed';
 
 export type AutoCloseReason =
   | 'booking_confirmed'
   | 'booking_cancelled'
   | 'human_handoff_completed'
   | 'voice_call_ended'
-  | 'idle_timeout';
+  | 'idle_timeout'
+  | 'auto_closed_idle';
 
 interface AutoCloseResult {
   closed: boolean;
+  skipped?: boolean;
   summary?: {
     summary: string;
     main_intent: string;
@@ -54,7 +61,7 @@ export async function autoCloseConversation(
   // Fetch conversation with messages for summary
   const { data: conversation, error: convError } = await supabase
     .from('conversations')
-    .select('id, empresa_id, status, conversation_state')
+    .select('id, empresa_id, status, owner, assigned_user_id, conversation_state, conversation_context')
     .eq('id', conversationId)
     .single();
 
@@ -67,6 +74,18 @@ export async function autoCloseConversation(
   if (conversation.status === 'closed') {
     console.log('[AutoClose] Already closed — skipping');
     return { closed: true };
+  }
+
+  if (reason === 'auto_closed_idle' && isProtectedFromIdleAutoClose(conversation)) {
+    console.log('[AutoClose] Active booking or human handoff detected - skipping idle auto-close', {
+      conversation_id: conversationId,
+      status: conversation.status,
+      owner: conversation.owner,
+      assigned_user_id: conversation.assigned_user_id,
+      conversation_state: conversation.conversation_state,
+      context_state: getContextState(conversation.conversation_context),
+    });
+    return { closed: false, skipped: true, error: 'Conversation is active or human-owned' };
   }
 
   // Generate summary
@@ -88,8 +107,9 @@ export async function autoCloseConversation(
     }
   }
 
-  // Close the conversation
-  const { error: updateError } = await supabase
+  // Close the conversation. Idle auto-close keeps a defensive write guard
+  // so a conversation that moved to human ownership between read/write is not closed.
+  let updateQuery = supabase
     .from('conversations')
     .update({
       status: 'closed',
@@ -103,9 +123,27 @@ export async function autoCloseConversation(
     })
     .eq('id', conversationId);
 
+  if (reason === 'auto_closed_idle') {
+    updateQuery = updateQuery
+      .in('status', ['ai_active', 'completed'])
+      .neq('owner', 'human')
+      .is('assigned_user_id', null);
+  }
+
+  const { data: updatedConversation, error: updateError } = await updateQuery
+    .select('id')
+    .maybeSingle();
+
   if (updateError) {
     console.error('[AutoClose] Failed to close:', updateError);
     return { closed: false, error: 'Failed to update conversation' };
+  }
+
+  if (reason === 'auto_closed_idle' && !updatedConversation) {
+    console.log('[AutoClose] Idle auto-close skipped by write guard', {
+      conversation_id: conversationId,
+    });
+    return { closed: false, skipped: true, error: 'Conversation no longer eligible' };
   }
 
   // Insert system message
@@ -121,16 +159,19 @@ export async function autoCloseConversation(
 
   // Emit platform event (async, non-blocking)
   const eventType = mapReasonToEventType(reason);
-  if (eventType) {
-    emitPlatformEvent({
-      type: eventType,
-      empresa_id: conversation.empresa_id,
-      conversation_id: conversationId,
-      payload: {
-        summary: summaryData.summary,
-      },
-      supabase,
-    }).catch(e => console.warn('[AutoClose] Platform event failed (non-blocking):', e));
+  if (eventType && reason !== 'auto_closed_idle') {
+    const platformEventsModule = './platform-events.ts';
+    import(platformEventsModule)
+      .then(({ emitPlatformEvent }) => emitPlatformEvent({
+        type: eventType,
+        empresa_id: conversation.empresa_id,
+        conversation_id: conversationId,
+        payload: {
+          summary: summaryData.summary,
+        },
+        supabase,
+      }))
+      .catch(e => console.warn('[AutoClose] Platform event failed (non-blocking):', e));
   }
 
   return { closed: true, summary: summaryData };
@@ -221,7 +262,8 @@ Responde APENAS com o JSON.`,
 // =============================================
 
 function mapReasonToDefaultSummary(reason: AutoCloseReason): string {
-  const map: Record<AutoCloseReason, string> = {
+  if (reason === 'auto_closed_idle') return 'Conversa encerrada automaticamente por inatividade.';
+  const map: Partial<Record<AutoCloseReason, string>> = {
     booking_confirmed: 'Agendamento confirmado com sucesso.',
     booking_cancelled: 'Agendamento cancelado pelo cliente.',
     human_handoff_completed: 'Conversa transferida para operador humano.',
@@ -232,7 +274,8 @@ function mapReasonToDefaultSummary(reason: AutoCloseReason): string {
 }
 
 function mapReasonToIntent(reason: AutoCloseReason): string {
-  const map: Record<AutoCloseReason, string> = {
+  if (reason === 'auto_closed_idle') return 'Nao determinado';
+  const map: Partial<Record<AutoCloseReason, string>> = {
     booking_confirmed: 'Agendamento',
     booking_cancelled: 'Cancelamento',
     human_handoff_completed: 'Atendimento humano',
@@ -243,7 +286,8 @@ function mapReasonToIntent(reason: AutoCloseReason): string {
 }
 
 function mapReasonToResult(reason: AutoCloseReason): string {
-  const map: Record<AutoCloseReason, string> = {
+  if (reason === 'auto_closed_idle') return 'Sem resposta';
+  const map: Partial<Record<AutoCloseReason, string>> = {
     booking_confirmed: 'Resolvido',
     booking_cancelled: 'Cancelado',
     human_handoff_completed: 'Transferido',
@@ -254,7 +298,8 @@ function mapReasonToResult(reason: AutoCloseReason): string {
 }
 
 function mapReasonToLabel(reason: AutoCloseReason): string {
-  const map: Record<AutoCloseReason, string> = {
+  if (reason === 'auto_closed_idle') return 'Inatividade';
+  const map: Partial<Record<AutoCloseReason, string>> = {
     booking_confirmed: 'Agendamento confirmado',
     booking_cancelled: 'Agendamento cancelado',
     human_handoff_completed: 'Transferência concluída',
@@ -265,6 +310,7 @@ function mapReasonToLabel(reason: AutoCloseReason): string {
 }
 
 function mapReasonToEventType(reason: AutoCloseReason): PlatformEventType | null {
+  if (reason === 'auto_closed_idle') return 'conversation_closed';
   // booking_confirmed is intentionally excluded — email is sent by BookingEngine
   const map: Partial<Record<AutoCloseReason, PlatformEventType>> = {
     booking_cancelled: 'booking_cancelled',
@@ -279,23 +325,63 @@ function mapReasonToEventType(reason: AutoCloseReason): PlatformEventType | null
 // Idle Timeout Scanner
 // =============================================
 
-const IDLE_TIMEOUT_MINUTES = 60;
+const IDLE_TIMEOUT_MINUTES = 24 * 60;
+
+const ACTIVE_BOOKING_STATES = new Set([
+  'collecting_service',
+  'collecting_data',
+  'awaiting_slot_selection',
+  'awaiting_confirmation',
+  'booking_processing',
+]);
+
+const HUMAN_HANDOFF_STATES = new Set([
+  'human_handoff',
+]);
+
+function getContextState(context: unknown): string | null {
+  if (!context || typeof context !== 'object') return null;
+  const state = (context as { state?: unknown }).state;
+  return typeof state === 'string' ? state : null;
+}
+
+function isProtectedFromIdleAutoClose(conversation: {
+  status?: string | null;
+  owner?: string | null;
+  assigned_user_id?: string | null;
+  conversation_state?: string | null;
+  conversation_context?: unknown;
+}): boolean {
+  const persistedState = conversation.conversation_state ?? null;
+  const contextState = getContextState(conversation.conversation_context);
+
+  return (
+    conversation.status === 'waiting_human' ||
+    conversation.status === 'human_active' ||
+    conversation.owner === 'human' ||
+    !!conversation.assigned_user_id ||
+    (persistedState != null && ACTIVE_BOOKING_STATES.has(persistedState)) ||
+    (persistedState != null && HUMAN_HANDOFF_STATES.has(persistedState)) ||
+    (contextState != null && ACTIVE_BOOKING_STATES.has(contextState)) ||
+    (contextState != null && HUMAN_HANDOFF_STATES.has(contextState))
+  );
+}
 
 /**
  * Scan for conversations that have been inactive beyond the timeout
- * and auto-close them with reason 'idle_timeout'.
+ * and auto-close them with reason 'auto_closed_idle'.
  *
- * Applies to conversations with status = 'ai_active' or 'completed'.
- * Skips 'waiting_human' and 'closed'.
+ * Applies only to conversations with status = 'ai_active' or 'completed'.
+ * Skips active booking states and human-owned/handoff conversations.
  */
 export async function closeIdleConversations(
   supabase: SupabaseClient,
-): Promise<{ closed: number; errors: number }> {
+): Promise<{ closed: number; skipped: number; errors: number }> {
   const cutoff = new Date(Date.now() - IDLE_TIMEOUT_MINUTES * 60 * 1000).toISOString();
 
   const { data: idle, error } = await supabase
     .from('conversations')
-    .select('id')
+    .select('id, status, owner, assigned_user_id, conversation_state, conversation_context')
     .in('status', ['ai_active', 'completed'])
     .lt('last_message_at', cutoff)
     .is('deleted_at', null)
@@ -304,25 +390,41 @@ export async function closeIdleConversations(
   if (error || !idle?.length) {
     if (error) console.error('[IdleTimeout] Query failed:', error);
     else console.log('[IdleTimeout] No idle conversations found');
-    return { closed: 0, errors: error ? 1 : 0 };
+    return { closed: 0, skipped: 0, errors: error ? 1 : 0 };
   }
 
-  console.log(`[IdleTimeout] Found ${idle.length} idle conversations to close`);
+  console.log(`[IdleTimeout] Found ${idle.length} idle conversation candidates`);
 
   let closed = 0;
+  let skipped = 0;
   let errors = 0;
 
   for (const conv of idle) {
-    const result = await autoCloseConversation(supabase, conv.id, 'idle_timeout', {
+    if (isProtectedFromIdleAutoClose(conv)) {
+      skipped++;
+      console.log('[IdleTimeout] Skipping protected conversation', {
+        conversation_id: conv.id,
+        status: conv.status,
+        owner: conv.owner,
+        assigned_user_id: conv.assigned_user_id,
+        conversation_state: conv.conversation_state,
+        context_state: getContextState(conv.conversation_context),
+      });
+      continue;
+    }
+
+    const result = await autoCloseConversation(supabase, conv.id, 'auto_closed_idle', {
       skipSummary: true,
     });
     if (result.closed) {
       closed++;
+    } else if (result.skipped) {
+      skipped++;
     } else {
       errors++;
     }
   }
 
-  console.log(`[IdleTimeout] Done: ${closed} closed, ${errors} errors`);
-  return { closed, errors };
+  console.log(`[IdleTimeout] Done: ${closed} closed, ${skipped} skipped, ${errors} errors`);
+  return { closed, skipped, errors };
 }
