@@ -24,8 +24,22 @@ function getContact(lead: Lead) {
   return [lead.phone, lead.email].filter(Boolean).join(' / ') || 'Sem contacto';
 }
 
-function getIntent(lead: Lead) {
-  return lead.conversations?.main_intent || lead.notes?.replace(/^Intent:\s*/i, '') || 'N/A';
+function getIntentLabel(intent?: string | null) {
+  switch (intent) {
+    case 'BOOKING_NEW':
+      return 'Marcação';
+    case 'INFO_REQUEST':
+      return 'Informação';
+    case 'PRICE_REQUEST':
+      return 'Preço';
+    case 'RESCHEDULE':
+      return 'Remarcação';
+    case 'CANCEL':
+      return 'Cancelamento';
+    case 'UNKNOWN':
+    default:
+      return 'Outro';
+  }
 }
 
 function getSource(lead: Lead) {
@@ -93,7 +107,7 @@ export default function LeadsPage() {
                         <TableCell className="font-medium">{lead.name || 'Sem nome'}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{getContact(lead)}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{getIntent(lead)}</Badge>
+                          <Badge variant="outline">{getIntentLabel(lead.conversations?.main_intent)}</Badge>
                         </TableCell>
                         <TableCell className="min-w-40">
                           <Select
