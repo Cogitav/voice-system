@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ConfirmationDialog } from '@/components/admin/ConfirmationDialog';
 import { TestEnvironmentBadge } from '@/components/admin/TestEnvironmentBadge';
 import { useEmpresas } from '@/hooks/useEmpresas';
@@ -28,9 +31,45 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
+  Activity,
+  CheckCircle2,
+  XCircle,
+  Loader2,
 } from 'lucide-react';
 
 type DialogType = 'archive' | 'restore' | 'reset-demo' | 'reset-credits' | null;
+
+// ---------------------------------------------------------------------------
+// System Health
+// ---------------------------------------------------------------------------
+// Shape returned by the `core-health-check` edge function (only what the
+// function returns is rendered — never fabricate health data on the client).
+//
+// Success response (200):
+//   { status: 'healthy' | 'issues_detected', total_issues: number,
+//     checks: { [key: string]: number } }
+//
+// Error response (500):
+//   { status: 'error', message: string }   ← surfaced via mutation.isError
+// ---------------------------------------------------------------------------
+interface HealthCheckResponse {
+  status: 'healthy' | 'issues_detected';
+  total_issues: number;
+  checks: Record<string, number>;
+}
+
+// Friendly labels for the check keys currently emitted by core-health-check.
+// Unknown keys fall back to the raw key so future checks render without
+// requiring a frontend change.
+const HEALTH_CHECK_LABELS: Record<string, string> = {
+  closed_without_result: 'Conversas fechadas sem resultado',
+  booking_active_without_appointment: 'Reservas activas sem agendamento associado',
+  booking_active_without_snapshot: 'Reservas activas sem snapshot confirmado',
+  idle_closed_mismatch: 'Conversas em estado idle mas com status closed',
+  duplicate_appointments: 'Agendamentos duplicados',
+  stuck_booking_processing: 'booking_processing parado há mais de 5 min',
+  awaiting_slot_selection_without_suggestions: 'awaiting_slot_selection sem sugestões',
+};
 
 export default function MaintenancePage() {
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<string>('');
@@ -43,6 +82,16 @@ export default function MaintenancePage() {
   const resetDemoMutation = useResetEmpresaDemoData();
   const resetCreditsMutation = useResetCreditsUsage();
   const toggleTestMutation = useToggleTestEnvironment();
+
+  // Calls the core-health-check edge function. Returns whatever the function
+  // returns — no client-side health is computed, no faked checks.
+  const healthCheck = useMutation<HealthCheckResponse, Error, void>({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('core-health-check');
+      if (error) throw error;
+      return data as HealthCheckResponse;
+    },
+  });
 
   const selectedEmpresa = empresas.find(e => e.id === selectedEmpresaId);
   const isArchived = selectedEmpresa?.deleted_at != null;
@@ -85,6 +134,108 @@ export default function MaintenancePage() {
             Ferramentas administrativas para gestão e limpeza de dados
           </p>
         </div>
+
+        {/* System Health */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Activity className="w-5 h-5" />
+              System Health
+            </CardTitle>
+            <CardDescription>
+              Diagnóstico de integridade dos dados de conversação e booking. Os
+              valores apresentados são exactamente os retornados pelo edge
+              function <code className="font-mono text-xs">core-health-check</code>.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <Button
+                onClick={() => healthCheck.mutate()}
+                disabled={healthCheck.isPending}
+                variant="outline"
+              >
+                {healthCheck.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    A verificar...
+                  </>
+                ) : (
+                  <>
+                    <Activity className="w-4 h-4 mr-2" />
+                    Check system status
+                  </>
+                )}
+              </Button>
+
+              {healthCheck.data && (
+                healthCheck.data.status === 'healthy' ? (
+                  <Badge className="bg-green-600 hover:bg-green-700">
+                    <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                    OK
+                  </Badge>
+                ) : (
+                  <Badge className="bg-amber-600 hover:bg-amber-700 text-white">
+                    <AlertTriangle className="w-3.5 h-3.5 mr-1" />
+                    DEGRADED
+                    <span className="ml-1.5 opacity-90">
+                      ({healthCheck.data.total_issues} {healthCheck.data.total_issues === 1 ? 'problema' : 'problemas'})
+                    </span>
+                  </Badge>
+                )
+              )}
+
+              {healthCheck.isError && !healthCheck.isPending && (
+                <Badge variant="destructive">
+                  <XCircle className="w-3.5 h-3.5 mr-1" />
+                  ERROR
+                </Badge>
+              )}
+            </div>
+
+            {healthCheck.isError && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Erro ao verificar status</AlertTitle>
+                <AlertDescription>
+                  {healthCheck.error?.message ?? 'Falha desconhecida ao chamar core-health-check.'}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {healthCheck.data && (
+              <div className="space-y-2">
+                {Object.entries(healthCheck.data.checks).map(([key, count]) => (
+                  <div
+                    key={key}
+                    className="flex items-center justify-between gap-3 p-3 border rounded-lg"
+                  >
+                    <span className="text-sm">
+                      {HEALTH_CHECK_LABELS[key] ?? key}
+                    </span>
+                    {count === 0 ? (
+                      <Badge variant="outline" className="border-green-600/40 text-green-700 dark:text-green-400">
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                        OK
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="border-red-600/40 text-red-700 dark:text-red-400">
+                        <XCircle className="w-3.5 h-3.5 mr-1" />
+                        {count} {count === 1 ? 'ocorrência' : 'ocorrências'}
+                      </Badge>
+                    )}
+                  </div>
+                ))}
+
+                {Object.keys(healthCheck.data.checks).length === 0 && (
+                  <p className="text-sm text-muted-foreground italic py-2">
+                    O edge function não retornou checks.
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Empresa Selector */}
         <Card>
