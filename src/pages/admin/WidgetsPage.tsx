@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { useEmpresas } from '@/hooks/useEmpresas';
@@ -7,26 +8,51 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Copy, Check, ExternalLink, Code2, Globe } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Copy, Check, ExternalLink, Code2, Globe, Info, Paintbrush } from 'lucide-react';
 import { toast } from 'sonner';
 
-const PUBLISHED_URL = 'https://voice-system-beta.vercel.app';
+// Resolves the public origin used to build chat URLs and embed snippets.
+// Priority:
+//   1. VITE_APP_PUBLIC_URL (explicit env override per environment).
+//   2. window.location.origin (admin is loaded over the same origin that
+//      serves /chat-widget.js, so this is the safe default).
+//   3. Empty string fallback — produces relative URLs which still resolve
+//      against the current origin.
+const PUBLIC_URL = (() => {
+  const envUrl = import.meta.env.VITE_APP_PUBLIC_URL;
+  if (typeof envUrl === 'string' && envUrl.trim().length > 0) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  return '';
+})();
 
 export default function WidgetsPage() {
+  const navigate = useNavigate();
   const { data: empresas, isLoading } = useEmpresas();
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const getWidgetUrl = (slug: string | null) => {
     if (!slug) return null;
-    return `${PUBLISHED_URL}/chat/${slug}`;
+    return `${PUBLIC_URL}/chat/${slug}`;
   };
 
   const getEmbedCode = (slug: string | null) => {
     if (!slug) return null;
-    return `<script 
-  src="${PUBLISHED_URL}/chat-widget.js"
+    return `<script
+  src="${PUBLIC_URL}/chat-widget.js"
   data-empresa="${slug}">
 </script>`;
+  };
+
+  // Deep-linking into the empresa edit dialog is not supported today, so we
+  // navigate to the empresas list — the admin can then open the empresa
+  // and switch to the branding tab manually.
+  const handleEditBranding = () => {
+    navigate('/admin/empresas');
   };
 
   const handleCopy = async (text: string, id: string, type: 'url' | 'code') => {
@@ -49,11 +75,22 @@ export default function WidgetsPage() {
       <div className="space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Gestão de Widgets</h1>
+          <h1 className="text-2xl font-bold text-foreground">Códigos de Embed</h1>
           <p className="text-muted-foreground">
-            Gerir códigos de integração do chat widget para cada empresa
+            Copie URLs públicos e snippets <code className="text-xs">&lt;script&gt;</code> para
+            integrar o chat widget de cada empresa em sites externos. Esta página
+            <strong> não configura</strong> o widget — apenas gera os snippets de integração.
           </p>
         </div>
+
+        {/* Branding lives elsewhere — keep discoverability explicit. */}
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertDescription>
+            A personalização visual do widget (cores, conteúdo, layout) é feita
+            na ficha da empresa, na área de <strong>branding</strong>.
+          </AlertDescription>
+        </Alert>
 
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -103,6 +140,7 @@ export default function WidgetsPage() {
                       embedCode={getEmbedCode(empresa.slug)}
                       copiedId={copiedId}
                       onCopy={handleCopy}
+                      onEditBranding={handleEditBranding}
                     />
                   ))}
                 </div>
@@ -166,9 +204,10 @@ interface WidgetCardProps {
   embedCode: string | null;
   copiedId: string | null;
   onCopy: (text: string, id: string, type: 'url' | 'code') => void;
+  onEditBranding: () => void;
 }
 
-function WidgetCard({ empresa, widgetUrl, embedCode, copiedId, onCopy }: WidgetCardProps) {
+function WidgetCard({ empresa, widgetUrl, embedCode, copiedId, onCopy, onEditBranding }: WidgetCardProps) {
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -178,7 +217,19 @@ function WidgetCard({ empresa, widgetUrl, embedCode, copiedId, onCopy }: WidgetC
             Ativo
           </Badge>
         </div>
-        <CardDescription>Slug: {empresa.slug}</CardDescription>
+        <div className="flex items-center justify-between gap-2">
+          <CardDescription>Slug: {empresa.slug}</CardDescription>
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            onClick={onEditBranding}
+            title="Ir para a ficha de empresas para editar branding"
+          >
+            <Paintbrush className="h-3 w-3 mr-1" />
+            Editar branding
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Widget URL */}
