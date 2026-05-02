@@ -31,23 +31,43 @@ export interface EmailTemplateFormData {
   recipient_type?: 'client' | 'company' | 'internal';
 }
 
-// Common intent options
+// Template categories — business-friendly labels backed by stable slugs.
+// The slugs intentionally preserve compatibility with the existing
+// auto-fire engine (platform-events.EVENT_TO_INTENT and follow_up_rules.intent),
+// which still queries by slugs like 'agendamento' / 'cancelamento' / 'informacao'.
+//
+//   Display label        → DB slug (column email_templates.intent)
+//   "Marcação"           → 'agendamento'        (matches booking_confirmed event)
+//   "Informação"         → 'informacao'         (matches conversation_closed event)
+//   "Cancelamento"       → 'cancelamento'       (matches booking_cancelled event)
+//   "Outro"              → 'outro'
+//   "Preço"              → 'preco'              (new — no auto event today)
+//   "Remarcação"         → 'remarcacao'         (new — could map to booking_rescheduled later)
+//   "Atendimento humano" → 'atendimento_humano' (new)
+//   "Follow-up"          → 'follow_up'          (new)
 export const INTENT_OPTIONS = [
+  { value: 'agendamento', label: 'Marcação' },
   { value: 'informacao', label: 'Informação' },
-  { value: 'agendamento', label: 'Agendamento' },
-  { value: 'reclamacao', label: 'Reclamação' },
-  { value: 'suporte', label: 'Suporte Técnico' },
-  { value: 'vendas', label: 'Vendas' },
+  { value: 'preco', label: 'Preço' },
+  { value: 'remarcacao', label: 'Remarcação' },
   { value: 'cancelamento', label: 'Cancelamento' },
-  { value: 'feedback', label: 'Feedback' },
+  { value: 'atendimento_humano', label: 'Atendimento humano' },
+  { value: 'follow_up', label: 'Follow-up' },
   { value: 'outro', label: 'Outro' },
 ];
 
-// Template variable placeholders
+// Standardized template variable placeholders. Operators see and click these
+// in the form; the edge function substitutes them at send time. Names match
+// the lead-context replacements in send-follow-up-email (including the
+// `cliente_email` / `cliente_telefone` aliases added for naming consistency).
 export const TEMPLATE_VARIABLES = [
   { variable: '{{cliente_nome}}', description: 'Nome do cliente' },
+  { variable: '{{cliente_email}}', description: 'Email do cliente' },
+  { variable: '{{cliente_telefone}}', description: 'Telefone do cliente' },
   { variable: '{{empresa_nome}}', description: 'Nome da empresa' },
-  { variable: '{{resumo_chamada}}', description: 'Resumo da chamada' },
+  { variable: '{{lead_status}}', description: 'Estado do lead' },
+  { variable: '{{lead_source}}', description: 'Origem do lead' },
+  { variable: '{{intent}}', description: 'Intent inferida da conversa' },
   { variable: '{{data_agendamento}}', description: 'Data do agendamento' },
   { variable: '{{hora_agendamento}}', description: 'Hora do agendamento' },
 ];

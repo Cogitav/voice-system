@@ -24,6 +24,29 @@ function getCurrentMonth(): string {
   return `${year}-${month}`;
 }
 
+function mapIntentToLabel(intent: string | null): string {
+  switch (intent) {
+    case "BOOKING_NEW":
+    case "CONFIRMATION":
+    case "SLOT_SELECTION":
+    case "TIME_BASED_SELECTION":
+      return "Marcação";
+    case "DATE_CHANGE":
+    case "RESCHEDULE":
+      return "Remarcação";
+    case "INFO_REQUEST":
+      return "Informação";
+    case "PRICE_REQUEST":
+      return "Preço";
+    case "CANCEL":
+      return "Cancelamento";
+    case "HUMAN_REQUEST":
+      return "Atendimento humano";
+    default:
+      return "Outro";
+  }
+}
+
 /**
  * Register credit usage (backend-only, idempotent, non-blocking)
  */
@@ -282,17 +305,21 @@ const handler = async (req: Request): Promise<Response> => {
       let body = template.body;
 
       const replacements: Record<string, string> = {
-        // Lead-context variables
+        // Lead-context variables (canonical: cliente_FIELD form, matching the
+        // standardized list in src/hooks/useEmailTemplates.ts TEMPLATE_VARIABLES).
+        "{{cliente_nome}}": leadName,
+        "{{cliente_email}}": lead.email || recipient_email,
+        "{{cliente_telefone}}": lead.phone || "",
+        "{{empresa_nome}}": empresaNome,
+        "{{lead_status}}": lead.status || "",
+        "{{lead_source}}": lead.source || "",
+        "{{intent}}": mapIntentToLabel(intent),
+        // Backward-compatible aliases (FIELD_cliente form) for templates
+        // authored against the previous variable naming.
         "{{nome_cliente}}": leadName,
         "{{email_cliente}}": lead.email || recipient_email,
         "{{telefone_cliente}}": lead.phone || "",
-        "{{lead_status}}": lead.status || "",
-        "{{lead_source}}": lead.source || "",
-        "{{intent}}": intent,
-        // Aliases for templates already using chamada-style variable names
-        "{{cliente_nome}}": leadName,
-        "{{empresa_nome}}": empresaNome,
-        // Call-only variables — empty string when no chamada in scope (per spec).
+        // Call-only variables — empty string when no chamada in scope.
         "{{resumo_chamada}}": "",
         "{{data_agendamento}}": "",
         "{{hora_agendamento}}": "",

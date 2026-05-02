@@ -135,7 +135,7 @@ export function EmailTemplateFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="intent">Intenção *</Label>
+              <Label htmlFor="intent">Categoria do Template *</Label>
               <Select
                 value={formData.intent}
                 onValueChange={(value) =>
@@ -143,7 +143,7 @@ export function EmailTemplateFormDialog({
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecionar intenção" />
+                  <SelectValue placeholder="Selecionar categoria" />
                 </SelectTrigger>
                 <SelectContent>
                   {INTENT_OPTIONS.map((option) => (

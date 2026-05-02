@@ -106,7 +106,7 @@ export function EmailTemplatesTable({
   if (templates.length === 0) {
     return (
       <div className="flex items-center justify-center p-8 text-muted-foreground">
-        Nenhum template encontrado. Crie o primeiro template de email.
+        Não existem templates configurados para esta empresa.
       </div>
     );
   }
@@ -118,10 +118,10 @@ export function EmailTemplatesTable({
           <TableHeader>
             <TableRow>
               {showEmpresa && <TableHead>Empresa</TableHead>}
-              <TableHead>Intenção</TableHead>
+              <TableHead>Categoria</TableHead>
               <TableHead>Destinatário</TableHead>
               <TableHead>Assunto</TableHead>
-              <TableHead>Estado</TableHead>
+              <TableHead>Ativo</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>

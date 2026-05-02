@@ -56,7 +56,8 @@ export default function EmailTemplatesPage() {
             <div>
               <h1 className="text-2xl font-semibold">Templates de Email</h1>
               <p className="text-muted-foreground">
-                Configure emails automáticos por intenção de chamada
+                Os templates são usados para comunicação com clientes. Podem ser
+                enviados manualmente ou utilizados em automações.
               </p>
             </div>
           </div>
@@ -64,16 +65,6 @@ export default function EmailTemplatesPage() {
             <Plus className="mr-2 h-4 w-4" />
             Novo Template
           </Button>
-        </div>
-
-        {/* Info box */}
-        <div className="bg-muted/50 border rounded-lg p-4">
-          <h3 className="font-medium mb-1">Como funciona</h3>
-          <p className="text-sm text-muted-foreground">
-            Quando uma chamada é concluída, o sistema verifica se existe um template
-            ativo para a intenção detetada. Se existir, um email é enviado
-            automaticamente ao cliente. Cada empresa pode ter um template por intenção.
-          </p>
         </div>
 
         {/* Filters */}
