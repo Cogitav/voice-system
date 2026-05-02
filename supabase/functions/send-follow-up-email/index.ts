@@ -4,6 +4,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 // Resend client
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
+// Verified sender address. Resolved once at cold-start. Set
+// EMAIL_FROM_ADDRESS in Supabase Edge Function secrets to a domain
+// verified in Resend for production sends. The Resend test address is
+// kept as a defensive fallback only — it is rate-limited and only allows
+// sending to the workspace owner.
+const EMAIL_FROM_ADDRESS = Deno.env.get("EMAIL_FROM_ADDRESS") || "onboarding@resend.dev";
+
 // Credit rules - keep in sync with src/lib/credits.ts
 const CREDIT_RULES: Record<string, number> = {
   call_completed: 30,
@@ -332,7 +339,7 @@ const handler = async (req: Request): Promise<Response> => {
 
       const emailResult = await sendEmail(
         recipient_email,
-        `${empresaNome} <onboarding@resend.dev>`,
+        `${empresaNome} <${EMAIL_FROM_ADDRESS}>`,
         subject,
         body
       );
@@ -482,7 +489,7 @@ const handler = async (req: Request): Promise<Response> => {
     // Send email
     const emailResult = await sendEmail(
       recipient_email,
-      `${empresaNome} <onboarding@resend.dev>`,
+      `${empresaNome} <${EMAIL_FROM_ADDRESS}>`,
       subject,
       body
     );
