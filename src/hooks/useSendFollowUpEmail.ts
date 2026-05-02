@@ -42,6 +42,9 @@ export function useSendFollowUpEmail() {
 interface SendLeadEmailParams {
   leadId: string;
   recipientEmail: string;
+  // Operator-selected template (required for the manual lead path — the
+  // edge function bypasses intent-based template matching for lead emails).
+  templateId: string;
   clienteNome?: string;
 }
 
@@ -58,6 +61,7 @@ export function useSendLeadEmail() {
       const { data, error } = await supabase.functions.invoke('send-follow-up-email', {
         body: {
           lead_id: params.leadId,
+          template_id: params.templateId,
           recipient_email: params.recipientEmail,
           cliente_nome: params.clienteNome,
         },

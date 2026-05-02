@@ -158,6 +158,10 @@ interface SendFollowUpRequest {
   // (lead-context email). Validated at runtime via XOR check.
   chamada_id?: string;
   lead_id?: string;
+  // For the lead path, template_id is REQUIRED — manual lead emails use
+  // explicit operator-selected templates instead of intent-based lookup.
+  // Ignored by the chamada path (which keeps intent-based lookup unchanged).
+  template_id?: string;
   recipient_email: string;
   cliente_nome?: string;
 }
@@ -173,7 +177,7 @@ const handler = async (req: Request): Promise<Response> => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
-    const { chamada_id, lead_id, recipient_email, cliente_nome }: SendFollowUpRequest = await req.json();
+    const { chamada_id, lead_id, template_id, recipient_email, cliente_nome }: SendFollowUpRequest = await req.json();
 
     if (!recipient_email) {
       return new Response(
@@ -243,17 +247,29 @@ const handler = async (req: Request): Promise<Response> => {
           ? conv.main_intent
           : "lead_followup";
 
-      // Find active template (same lookup pattern as chamada path).
+      // Manual lead emails require an operator-selected template_id.
+      // We deliberately bypass intent-based lookup here because the lead-side
+      // intent ontologies (BOOKING_NEW / 'Agendamento' / etc.) do NOT align
+      // with email_templates.intent slugs ('agendamento' / 'informacao' / ...).
+      // The intent variable above is still resolved — it remains useful for
+      // {{intent}} substitution in the template body.
+      if (!template_id || typeof template_id !== "string" || template_id.length === 0) {
+        return new Response(
+          JSON.stringify({ error: "template_id is required for lead emails" }),
+          { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+
       const { data: template, error: templateError } = await supabase
         .from("email_templates")
         .select("*")
+        .eq("id", template_id)
         .eq("empresa_id", empresaId)
-        .eq("intent", intent)
         .eq("is_active", true)
         .single();
 
       if (templateError || !template) {
-        console.log("No active template for lead intent:", intent, "empresa:", empresaId);
+        console.log("Template not found or inactive:", template_id, "empresa:", empresaId);
         return new Response(
           JSON.stringify({ success: false, reason: "no_template" }),
           { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }

@@ -13,9 +13,18 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ConfirmationDialog } from '@/components/admin/ConfirmationDialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeads, useUpdateLeadStatus, type Lead } from '@/hooks/useLeads';
+import { useEmailTemplatesByEmpresa } from '@/hooks/useEmailTemplates';
 import { useSendLeadEmail } from '@/hooks/useSendFollowUpEmail';
 
 const LEAD_STATUSES: Array<{ value: Lead['status']; label: string }> = [
@@ -158,6 +167,21 @@ export default function LeadsPage() {
   const updateLeadStatus = useUpdateLeadStatus();
   const sendLeadEmail = useSendLeadEmail();
   const [emailDialogLead, setEmailDialogLead] = useState<Lead | null>(null);
+  const [emailTemplateId, setEmailTemplateId] = useState<string>('');
+
+  // Load templates for the lead's empresa (only when dialog is open).
+  const { data: emailTemplates = [], isLoading: loadingTemplates } = useEmailTemplatesByEmpresa(
+    emailDialogLead?.empresa_id ?? null,
+  );
+  const activeEmailTemplates = useMemo(
+    () => emailTemplates.filter((t) => t.is_active),
+    [emailTemplates],
+  );
+
+  const closeEmailDialog = () => {
+    setEmailDialogLead(null);
+    setEmailTemplateId('');
+  };
   const [search, setSearch] = useState('');
   const [companyFilter, setCompanyFilter] = useState('all');
   const [dateRange, setDateRange] = useState<DateRangeFilter>('all');
@@ -490,47 +514,114 @@ export default function LeadsPage() {
           </Card>
         </div>
 
-        <ConfirmationDialog
+        <Dialog
           open={!!emailDialogLead}
           onOpenChange={(open) => {
-            if (!open) setEmailDialogLead(null);
+            if (!open) closeEmailDialog();
           }}
-          title="Enviar email a este lead?"
-          description={
-            emailDialogLead
-              ? `O email vai ser enviado para ${emailDialogLead.email}.\n\n` +
-                `O template é escolhido automaticamente pela intent associada (${getIntentLabel(getLeadIntentSource(emailDialogLead))}). ` +
-                `Se não existir template configurado para esta intent, o envio é cancelado e nada é enviado.`
-              : ''
-          }
-          confirmLabel="Enviar"
-          isLoading={sendLeadEmail.isPending}
-          onConfirm={async () => {
-            if (!emailDialogLead?.email) return;
-            const lead = emailDialogLead;
-            try {
-              await sendLeadEmail.mutateAsync({
-                leadId: lead.id,
-                recipientEmail: lead.email,
-                clienteNome: lead.name ?? undefined,
-              });
-              toast.success(`Email enviado para ${lead.email}`);
-            } catch (err) {
-              const reason = err instanceof Error ? err.message : 'unknown_error';
-              const friendly =
-                reason === 'no_template'
-                  ? 'Não existe um template ativo para a intent deste lead.'
-                  : reason === 'lead_not_found'
-                    ? 'Lead não encontrado.'
-                    : reason === 'email_send_failed'
-                      ? 'Falha ao enviar via Resend.'
-                      : `Falha ao enviar email: ${reason}`;
-              toast.error(friendly);
-            } finally {
-              setEmailDialogLead(null);
-            }
-          }}
-        />
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Enviar email a este lead</DialogTitle>
+              <DialogDescription>
+                Escolha o template a usar. O template é aplicado tal como está em <em>Templates de Email</em> e enviado de forma manual — não há automação.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Destinatário</Label>
+                <p className="text-sm font-medium break-all">{emailDialogLead?.email ?? '—'}</p>
+                {emailDialogLead && (
+                  <p className="text-xs text-muted-foreground">
+                    {emailDialogLead.name ?? 'Sem nome'}
+                    {emailDialogLead && (
+                      <>
+                        {' · '}
+                        <span>Intent inferida: {getIntentLabel(getLeadIntentSource(emailDialogLead))}</span>
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-email-template" className="text-xs text-muted-foreground">
+                  Template
+                </Label>
+                <Select
+                  value={emailTemplateId}
+                  onValueChange={setEmailTemplateId}
+                  disabled={loadingTemplates || activeEmailTemplates.length === 0}
+                >
+                  <SelectTrigger id="lead-email-template">
+                    <SelectValue
+                      placeholder={
+                        loadingTemplates
+                          ? 'A carregar templates...'
+                          : activeEmailTemplates.length === 0
+                            ? 'Sem templates ativos para esta empresa'
+                            : 'Escolher template...'
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeEmailTemplates.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        {template.subject}
+                        <span className="text-muted-foreground"> ({template.intent} · {template.recipient_type})</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Apenas templates ativos da empresa do lead são listados.
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={closeEmailDialog} disabled={sendLeadEmail.isPending}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (!emailDialogLead?.email || !emailTemplateId) return;
+                  const lead = emailDialogLead;
+                  try {
+                    await sendLeadEmail.mutateAsync({
+                      leadId: lead.id,
+                      recipientEmail: lead.email,
+                      templateId: emailTemplateId,
+                      clienteNome: lead.name ?? undefined,
+                    });
+                    toast.success(`Email enviado para ${lead.email}`);
+                    closeEmailDialog();
+                  } catch (err) {
+                    const reason = err instanceof Error ? err.message : 'unknown_error';
+                    const friendly =
+                      reason === 'no_template'
+                        ? 'Template selecionado não existe ou está inativo.'
+                        : reason === 'lead_not_found'
+                          ? 'Lead não encontrado.'
+                          : reason === 'email_send_failed'
+                            ? 'Falha ao enviar via Resend.'
+                            : `Falha ao enviar email: ${reason}`;
+                    toast.error(friendly);
+                  }
+                }}
+                disabled={
+                  !emailTemplateId ||
+                  sendLeadEmail.isPending ||
+                  activeEmailTemplates.length === 0 ||
+                  !emailDialogLead?.email
+                }
+              >
+                {sendLeadEmail.isPending ? 'A enviar...' : 'Enviar'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </PageLayout>
     </AppShell>
   );
