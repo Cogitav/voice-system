@@ -28,17 +28,22 @@ import {
 } from '@/hooks/useEmailTemplates';
 import { Badge } from '@/components/ui/badge';
 import { Info } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface EmailTemplateFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   template?: EmailTemplate | null;
+  initialData?: Partial<EmailTemplateFormData> | null;
+  title?: string;
 }
 
 export function EmailTemplateFormDialog({
   open,
   onOpenChange,
   template,
+  initialData,
+  title,
 }: EmailTemplateFormDialogProps) {
   const { data: empresas = [] } = useEmpresas();
   const createTemplate = useCreateEmailTemplate();
@@ -65,6 +70,15 @@ export function EmailTemplateFormDialog({
         is_active: template.is_active,
         recipient_type: template.recipient_type || 'client',
       });
+    } else if (initialData) {
+      setFormData({
+        empresa_id: initialData.empresa_id ?? '',
+        intent: initialData.intent ?? '',
+        subject: initialData.subject ?? '',
+        body: initialData.body ?? '',
+        is_active: initialData.is_active ?? true,
+        recipient_type: initialData.recipient_type ?? 'client',
+      });
     } else {
       setFormData({
         empresa_id: '',
@@ -75,10 +89,15 @@ export function EmailTemplateFormDialog({
         recipient_type: 'client',
       });
     }
-  }, [template, open]);
+  }, [template, initialData, open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!formData.intent) {
+      toast.error('Selecione uma categoria antes de guardar o template.');
+      return;
+    }
 
     try {
       if (isEditing && template) {
@@ -106,7 +125,7 @@ export function EmailTemplateFormDialog({
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isEditing ? 'Editar Template de Email' : 'Novo Template de Email'}
+            {title ?? (isEditing ? 'Editar Template de Email' : 'Novo Template de Email')}
           </DialogTitle>
         </DialogHeader>
 
@@ -160,7 +179,7 @@ export function EmailTemplateFormDialog({
             <Label htmlFor="recipient_type">Destinatário *</Label>
             <Select
               value={formData.recipient_type}
-              onValueChange={(value: 'client' | 'company') =>
+              onValueChange={(value: 'client' | 'company' | 'internal') =>
                 setFormData((prev) => ({ ...prev, recipient_type: value }))
               }
             >
@@ -170,6 +189,7 @@ export function EmailTemplateFormDialog({
               <SelectContent>
                 <SelectItem value="client">Cliente</SelectItem>
                 <SelectItem value="company">Empresa (interno)</SelectItem>
+                <SelectItem value="internal">Notificação Interna</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">

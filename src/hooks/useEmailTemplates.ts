@@ -126,6 +126,17 @@ export function useEmailTemplatesByEmpresa(empresaId: string | null) {
   });
 }
 
+function isDuplicateTemplateError(error: Error): boolean {
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('duplicate key') ||
+    message.includes('23505') ||
+    message.includes('unique constraint')
+  );
+}
+
+const DUPLICATE_TEMPLATE_MESSAGE = 'Já existe um template para esta categoria e destinatário.';
+
 export function useCreateEmailTemplate() {
   const queryClient = useQueryClient();
 
@@ -155,6 +166,10 @@ export function useCreateEmailTemplate() {
       toast.success('Template criado com sucesso!');
     },
     onError: (error: Error) => {
+      if (isDuplicateTemplateError(error)) {
+        toast.error(DUPLICATE_TEMPLATE_MESSAGE);
+        return;
+      }
       if (error.message.includes('duplicate key')) {
         toast.error('Já existe um template para esta intenção e destinatário nesta empresa.');
       } else {
@@ -200,6 +215,10 @@ export function useUpdateEmailTemplate() {
       toast.success('Template atualizado com sucesso!');
     },
     onError: (error: Error) => {
+      if (isDuplicateTemplateError(error)) {
+        toast.error(DUPLICATE_TEMPLATE_MESSAGE);
+        return;
+      }
       toast.error(`Erro ao atualizar template: ${error.message}`);
     },
   });

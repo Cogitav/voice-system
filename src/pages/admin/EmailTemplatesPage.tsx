@@ -6,6 +6,7 @@ import { Plus, Mail } from 'lucide-react';
 import {
   useEmailTemplates,
   EmailTemplate,
+  EmailTemplateFormData,
 } from '@/hooks/useEmailTemplates';
 import { EmailTemplatesTable } from '@/components/email-templates/EmailTemplatesTable';
 import { EmailTemplateFormDialog } from '@/components/email-templates/EmailTemplateFormDialog';
@@ -21,6 +22,7 @@ import { useEmpresas } from '@/hooks/useEmpresas';
 export default function EmailTemplatesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
+  const [duplicateDraft, setDuplicateDraft] = useState<Partial<EmailTemplateFormData> | null>(null);
   const [empresaFilter, setEmpresaFilter] = useState<string>('all');
 
   const { data: templates = [], isLoading } = useEmailTemplates();
@@ -32,7 +34,21 @@ export default function EmailTemplatesPage() {
       : templates.filter((t) => t.empresa_id === empresaFilter);
 
   const handleEdit = (template: EmailTemplate) => {
+    setDuplicateDraft(null);
     setEditingTemplate(template);
+    setDialogOpen(true);
+  };
+
+  const handleDuplicate = (template: EmailTemplate) => {
+    setEditingTemplate(null);
+    setDuplicateDraft({
+      empresa_id: template.empresa_id,
+      intent: '',
+      subject: template.subject,
+      body: template.body,
+      is_active: false,
+      recipient_type: template.recipient_type,
+    });
     setDialogOpen(true);
   };
 
@@ -40,6 +56,7 @@ export default function EmailTemplatesPage() {
     setDialogOpen(open);
     if (!open) {
       setEditingTemplate(null);
+      setDuplicateDraft(null);
     }
   };
 
@@ -89,6 +106,7 @@ export default function EmailTemplatesPage() {
           templates={filteredTemplates}
           isLoading={isLoading}
           onEdit={handleEdit}
+          onDuplicate={handleDuplicate}
         />
 
         {/* Dialog */}
@@ -96,6 +114,8 @@ export default function EmailTemplatesPage() {
           open={dialogOpen}
           onOpenChange={handleDialogClose}
           template={editingTemplate}
+          initialData={duplicateDraft}
+          title={duplicateDraft ? 'Duplicar Template de Email' : undefined}
         />
       </div>
       </PageLayout>

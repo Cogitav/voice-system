@@ -34,12 +34,12 @@ import {
   useDeleteEmailTemplate,
   useToggleEmailTemplate,
 } from '@/hooks/useEmailTemplates';
-import { useDuplicateEmailTemplate } from '@/hooks/useDuplicateEmailTemplate';
 
 interface EmailTemplatesTableProps {
   templates: EmailTemplate[];
   isLoading: boolean;
   onEdit: (template: EmailTemplate) => void;
+  onDuplicate: (template: EmailTemplate) => void;
   showEmpresa?: boolean;
 }
 
@@ -47,12 +47,12 @@ export function EmailTemplatesTable({
   templates,
   isLoading,
   onEdit,
+  onDuplicate,
   showEmpresa = true,
 }: EmailTemplatesTableProps) {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const deleteTemplate = useDeleteEmailTemplate();
   const toggleTemplate = useToggleEmailTemplate();
-  const duplicateTemplate = useDuplicateEmailTemplate();
 
   const getIntentLabel = (intent: string) => {
     return INTENT_OPTIONS.find((o) => o.value === intent)?.label || intent;
@@ -85,7 +85,7 @@ export function EmailTemplatesTable({
   };
 
   const handleDuplicate = (template: EmailTemplate) => {
-    duplicateTemplate.mutate(template);
+    onDuplicate(template);
   };
 
   const handleDelete = () => {
