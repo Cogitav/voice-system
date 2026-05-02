@@ -11,6 +11,21 @@ const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 // sending to the workspace owner.
 const EMAIL_FROM_ADDRESS = Deno.env.get("EMAIL_FROM_ADDRESS") || "onboarding@resend.dev";
 
+// Friendly labels for template category slugs. Mirrors INTENT_OPTIONS in
+// src/hooks/useEmailTemplates.ts. Used to render {{intent}} in lead emails
+// so the recipient sees "Marcação" rather than the internal slug
+// "agendamento". Unknown slugs fall back to the conversation-derived intent.
+const TEMPLATE_INTENT_LABELS: Record<string, string> = {
+  agendamento: "Marcação",
+  informacao: "Informação",
+  preco: "Preço",
+  remarcacao: "Remarcação",
+  cancelamento: "Cancelamento",
+  atendimento_humano: "Atendimento humano",
+  follow_up: "Follow-up",
+  outro: "Outro",
+};
+
 // Credit rules - keep in sync with src/lib/credits.ts
 const CREDIT_RULES: Record<string, number> = {
   call_completed: 30,
@@ -308,6 +323,69 @@ const handler = async (req: Request): Promise<Response> => {
 
       const leadName = lead.name || cliente_nome || "Cliente";
 
+      // ─── Resolve booking context for {{data_agendamento}} / {{hora_agendamento}} ──
+      // Priority:
+      //   (a) conversation_context.agendamento_id  → fetch agendamento row
+      //   (b) conversation_context.confirmed_snapshot.start → derive date/time
+      //   (c) latest agendamento for the conversation — NOT SUPPORTED: the
+      //       agendamentos schema has no conversation_id column (only chamada_id).
+      //       Skipped intentionally.
+      //   (d) fallback: empty strings.
+      const ctxObj =
+        ctxField && typeof ctxField === "object"
+          ? (ctxField as Record<string, unknown>)
+          : null;
+
+      let dataAgendamento = "";
+      let horaAgendamento = "";
+
+      const ctxAgendamentoId =
+        ctxObj && typeof ctxObj.agendamento_id === "string" && ctxObj.agendamento_id.length > 0
+          ? ctxObj.agendamento_id
+          : null;
+
+      if (ctxAgendamentoId) {
+        const { data: agendamento } = await supabase
+          .from("agendamentos")
+          .select("data, hora")
+          .eq("id", ctxAgendamentoId)
+          .eq("empresa_id", empresaId)   // defensive cross-tenant guard
+          .maybeSingle();
+        if (agendamento) {
+          dataAgendamento = agendamento.data || "";
+          // hora is stored as "HH:MM:SS"; trim to "HH:MM" for emails.
+          horaAgendamento = (agendamento.hora || "").slice(0, 5);
+        }
+      }
+
+      if (!dataAgendamento || !horaAgendamento) {
+        const snapshot =
+          ctxObj && typeof ctxObj.confirmed_snapshot === "object" && ctxObj.confirmed_snapshot !== null
+            ? (ctxObj.confirmed_snapshot as Record<string, unknown>)
+            : null;
+        const snapshotStart =
+          snapshot && typeof snapshot.start === "string" && snapshot.start.length > 0
+            ? snapshot.start
+            : null;
+        if (snapshotStart) {
+          // ISO format: "YYYY-MM-DDTHH:MM:SS+TZ"
+          if (!dataAgendamento) dataAgendamento = snapshotStart.slice(0, 10);
+          if (!horaAgendamento) {
+            const m = snapshotStart.match(/T(\d{2}):(\d{2})/);
+            if (m) horaAgendamento = `${m[1]}:${m[2]}`;
+          }
+        }
+      }
+
+      // ─── Resolve {{intent}} display value ──
+      // Prefer the friendly label of the selected template's category slug
+      // (operator's intent for THIS communication). Fall back to the
+      // conversation-derived runtime intent only when the template slug
+      // is not in our standardized mapping (e.g. legacy values like
+      // 'reclamacao' / 'suporte' that pre-date the new category set).
+      const intentForTemplate =
+        TEMPLATE_INTENT_LABELS[template.intent] ?? mapIntentToLabel(intent);
+
       let subject = template.subject;
       let body = template.body;
 
@@ -320,16 +398,17 @@ const handler = async (req: Request): Promise<Response> => {
         "{{empresa_nome}}": empresaNome,
         "{{lead_status}}": lead.status || "",
         "{{lead_source}}": lead.source || "",
-        "{{intent}}": mapIntentToLabel(intent),
+        "{{intent}}": intentForTemplate,
         // Backward-compatible aliases (FIELD_cliente form) for templates
         // authored against the previous variable naming.
         "{{nome_cliente}}": leadName,
         "{{email_cliente}}": lead.email || recipient_email,
         "{{telefone_cliente}}": lead.phone || "",
-        // Call-only variables — empty string when no chamada in scope.
+        // Booking context (resolved above; empty strings when no booking).
+        "{{data_agendamento}}": dataAgendamento,
+        "{{hora_agendamento}}": horaAgendamento,
+        // Call-only variable — chamada path populates this; lead path leaves empty.
         "{{resumo_chamada}}": "",
-        "{{data_agendamento}}": "",
-        "{{hora_agendamento}}": "",
       };
 
       for (const [key, value] of Object.entries(replacements)) {
