@@ -14,6 +14,21 @@ type BookingInsertError = {
   hint?: string | null;
 };
 
+type EmailTemplate = {
+  id: string;
+  subject: string;
+  body: string;
+};
+
+type SendEmailResult = {
+  success: boolean;
+  id?: string;
+  error?: string;
+};
+
+const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+const EMAIL_FROM_ADDRESS = Deno.env.get('EMAIL_FROM_ADDRESS') || 'onboarding@resend.dev';
+
 function redactBookingInsertPayload(payload: Record<string, unknown>): Record<string, unknown> {
   return {
     ...payload,
@@ -99,6 +114,223 @@ function logBookingFlowEvent(
   );
 }
 
+function replaceTemplateVariables(template: string, replacements: Record<string, string>): string {
+  let output = template;
+  for (const [key, value] of Object.entries(replacements)) {
+    output = output.replace(new RegExp(key.replace(/[{}]/g, '\\$&'), 'g'), value);
+  }
+  return output;
+}
+
+async function sendEmail(
+  to: string,
+  from: string,
+  subject: string,
+  text: string,
+): Promise<SendEmailResult> {
+  if (!RESEND_API_KEY) {
+    return { success: false, error: 'RESEND_API_KEY not configured' };
+  }
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject,
+        text,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return { success: false, error: data.message || 'Failed to send email' };
+    }
+
+    return { success: true, id: data.id };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function sendBookingConfirmationEmail(params: {
+  db: ReturnType<typeof getServiceClient>;
+  context: ConversationContext;
+  empresaId: string;
+  bookingId: string;
+  bookingCreatedAt: string;
+  dataAgendamento: string;
+  horaAgendamento: string;
+  conversationId: string;
+}): Promise<void> {
+  const {
+    db,
+    context,
+    empresaId,
+    bookingId,
+    bookingCreatedAt,
+    dataAgendamento,
+    horaAgendamento,
+    conversationId,
+  } = params;
+
+  try {
+    const recipientEmail = context.customer_email?.trim();
+    if (!recipientEmail) {
+      console.warn('[BOOKING_CONFIRMATION_EMAIL_SKIPPED]', {
+        reason: 'missing_customer_email',
+        booking_id: bookingId,
+        conversation_id: conversationId,
+      });
+      return;
+    }
+
+    const { data: templates, error: templateError } = await db
+      .from('email_templates')
+      .select('id, subject, body')
+      .eq('empresa_id', empresaId)
+      .eq('intent', 'agendamento')
+      .eq('is_active', true)
+      .eq('recipient_type', 'client')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (templateError) {
+      console.warn('[BOOKING_CONFIRMATION_EMAIL_TEMPLATE_LOOKUP_FAILED]', {
+        booking_id: bookingId,
+        conversation_id: conversationId,
+        error: templateError.message,
+      });
+      return;
+    }
+
+    const template = (templates?.[0] ?? null) as EmailTemplate | null;
+    if (!template) {
+      console.warn('[BOOKING_CONFIRMATION_EMAIL_SKIPPED]', {
+        reason: 'no_active_client_agendamento_template',
+        booking_id: bookingId,
+        conversation_id: conversationId,
+      });
+      return;
+    }
+
+    const { data: existingLogs } = await db
+      .from('email_logs')
+      .select('id')
+      .eq('empresa_id', empresaId)
+      .eq('template_id', template.id)
+      .eq('recipient_email', recipientEmail)
+      .eq('status', 'sent')
+      .gte('created_at', bookingCreatedAt)
+      .limit(1);
+
+    if (existingLogs?.length) {
+      console.log('[BOOKING_CONFIRMATION_EMAIL_SKIPPED]', {
+        reason: 'already_sent',
+        booking_id: bookingId,
+        email_log_id: existingLogs[0].id,
+        conversation_id: conversationId,
+      });
+      return;
+    }
+
+    const { data: empresa } = await db
+      .from('empresas')
+      .select('nome')
+      .eq('id', empresaId)
+      .maybeSingle();
+
+    const empresaNome = empresa?.nome || 'Empresa';
+    const serviceName = context.service_name || context.confirmed_snapshot?.service_name || 'Serviço';
+    const replacements = {
+      '{{cliente_nome}}': context.customer_name || 'Cliente',
+      '{{cliente_email}}': recipientEmail,
+      '{{cliente_telefone}}': context.customer_phone || '',
+      '{{empresa_nome}}': empresaNome,
+      '{{data_agendamento}}': dataAgendamento,
+      '{{hora_agendamento}}': horaAgendamento.slice(0, 5),
+      '{{intent}}': serviceName,
+      '{{servico_nome}}': serviceName,
+      '{{nome_cliente}}': context.customer_name || 'Cliente',
+      '{{email_cliente}}': recipientEmail,
+      '{{telefone_cliente}}': context.customer_phone || '',
+    };
+
+    const subject = replaceTemplateVariables(template.subject, replacements);
+    const body = replaceTemplateVariables(template.body, replacements);
+    const emailResult = await sendEmail(
+      recipientEmail,
+      `${empresaNome} <${EMAIL_FROM_ADDRESS}>`,
+      subject,
+      body,
+    );
+
+    if (!emailResult.success) {
+      console.warn('[BOOKING_CONFIRMATION_EMAIL_FAILED]', {
+        booking_id: bookingId,
+        conversation_id: conversationId,
+        error: emailResult.error,
+      });
+
+      await db.from('email_logs').insert({
+        chamada_id: null,
+        template_id: template.id,
+        empresa_id: empresaId,
+        recipient_email: recipientEmail,
+        subject,
+        body,
+        status: 'failed',
+        error_message: emailResult.error ?? 'Failed to send email',
+      });
+      return;
+    }
+
+    const { data: emailLog, error: emailLogError } = await db
+      .from('email_logs')
+      .insert({
+        chamada_id: null,
+        template_id: template.id,
+        empresa_id: empresaId,
+        recipient_email: recipientEmail,
+        subject,
+        body,
+        status: 'sent',
+        sent_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+
+    if (emailLogError || !emailLog?.id) {
+      console.warn('[BOOKING_CONFIRMATION_EMAIL_LOG_FAILED]', {
+        booking_id: bookingId,
+        conversation_id: conversationId,
+        error: emailLogError?.message ?? 'Missing email_log id',
+      });
+      return;
+    }
+
+    await consumeCredits(empresaId, 'email_send', emailLog.id);
+    console.log('[BOOKING_CONFIRMATION_EMAIL_SENT]', {
+      booking_id: bookingId,
+      conversation_id: conversationId,
+      email_log_id: emailLog.id,
+      provider_email_id: emailResult.id ?? null,
+    });
+  } catch (error) {
+    console.warn('[BOOKING_CONFIRMATION_EMAIL_ERROR]', {
+      booking_id: bookingId,
+      conversation_id: conversationId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export async function executeBooking(
   context: ConversationContext,
   empresaId: string,
@@ -127,11 +359,21 @@ export async function executeBooking(
   const db = getServiceClient();
   const { data: existing } = await db
     .from('agendamentos')
-    .select('id')
+    .select('id, created_at')
     .eq('execution_id', executionId)
     .single();
 
   if (existing) {
+    await sendBookingConfirmationEmail({
+      db,
+      context,
+      empresaId,
+      bookingId: existing.id,
+      bookingCreatedAt: existing.created_at,
+      dataAgendamento: context.selected_slot?.start.slice(0, 10) ?? '',
+      horaAgendamento: (context.selected_slot?.start.match(/T(\d{2}:\d{2})/)?.[1] ?? '').slice(0, 5),
+      conversationId,
+    });
     logBookingFlowEvent('FLOW_BOOKING_SUCCESS', context, conversationId, {
       reason: 'duplicate_execution',
       agendamento_id: existing.id,
@@ -343,17 +585,17 @@ export async function executeBooking(
     credits_consumed: 5,
   };
 
-  let booking: { id: string } | null = null;
+  let booking: { id: string; created_at: string } | null = null;
   let bookingError: BookingInsertError | null = null;
 
   try {
     const insertResult = await db
       .from('agendamentos')
       .insert(insertPayload)
-      .select('id')
+      .select('id, created_at')
       .single();
 
-    booking = insertResult.data as { id: string } | null;
+    booking = insertResult.data as { id: string; created_at: string } | null;
     bookingError = insertResult.error;
   } catch (error) {
     bookingError = normalizeUnknownError(error);
@@ -409,6 +651,17 @@ export async function executeBooking(
 
   // Consume credits
   await consumeCredits(empresaId, 'booking_create', booking.id);
+
+  await sendBookingConfirmationEmail({
+    db,
+    context,
+    empresaId,
+    bookingId: booking.id,
+    bookingCreatedAt: booking.created_at,
+    dataAgendamento: dataStr,
+    horaAgendamento: horaStr,
+    conversationId,
+  });
 
   // Log action
   await logAction({
