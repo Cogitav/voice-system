@@ -44,6 +44,12 @@ export interface ConversationContext {
   service_name: string | null;
   service_source: string | null;
   service_locked: boolean;
+  // Loop guard for service resolution. Incremented every time the
+  // assistant enters the ASK_SERVICE branch without a resolved service;
+  // reset to 0 once a service is set. Used to switch from a friendly
+  // open-ended ask to a deterministic numbered list after repeated
+  // failures. Optional + JSONB-resident — no schema change required.
+  service_resolution_attempts?: number;
   preferred_date: string | null;
   preferred_time: string | null;
   available_slots: SlotSuggestion[];

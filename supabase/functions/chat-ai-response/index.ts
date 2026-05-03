@@ -642,8 +642,14 @@ function shouldAcceptCustomerName(
 
   const explicitName = hasExplicitNameSignal(userMessage);
   const personalDataSignal = hasPersonalDataSignal(extraction, userMessage);
+  // In collecting_service we normally refuse to accept a name (the user is
+  // expected to be naming a SERVICE, not themselves). But when the same
+  // message also carries an explicit name signal or personal-data signal
+  // (e.g. "Tiago, email teste@example.com, telefone ..."), the user is
+  // proactively volunteering their data — preserve it instead of dropping
+  // it on the floor and re-asking later.
   const serviceOrReasonTurn =
-    context.state === 'collecting_service' ||
+    (context.state === 'collecting_service' && !explicitName && !personalDataSignal) ||
     (
       hasSoftServiceSignal(extraction) &&
       !explicitName &&
@@ -1418,6 +1424,7 @@ serve(async (req) => {
         empresaId,
         services,
         buildServiceResolutionObservability(updatedContext),
+        { explicitServiceSignal: hasSoftServiceSignal(extraction) },
       );
       const isDifferentService =
         !!serviceResult.service_id &&
@@ -1431,6 +1438,7 @@ serve(async (req) => {
           service_name: serviceResult.service_name,
           service_source: 'explicit_service_change',
           service_locked: true,
+          service_resolution_attempts: 0,
           selected_slot: null,
           available_slots: [],
           slots_page: 0,
@@ -1577,6 +1585,7 @@ serve(async (req) => {
           service_name: numericService.name,
           service_source: 'menu_numeric_selection',
           service_locked: true,
+          service_resolution_attempts: 0,
           selected_slot: null,
           available_slots: [],
           slots_page: 0,
@@ -1653,6 +1662,7 @@ serve(async (req) => {
           service_name: numericService.name,
           service_source: 'menu_numeric_selection',
           service_locked: true,
+          service_resolution_attempts: 0,
         }, updatedContext.context_version);
         requireReason = shouldRequireReasonForRuntime(numericService, bookingConfig);
         emitFlowEvent('FLOW_SERVICE_RESOLVED', updatedContext, {
@@ -1703,6 +1713,7 @@ serve(async (req) => {
           empresaId,
           services,
           buildServiceResolutionObservability(updatedContext),
+          { explicitServiceSignal: hasSoftServiceSignal(extraction) },
         );
         logFlow('[FLOW_SERVICE]', {
           conversation_id: conversationId,
@@ -1723,6 +1734,7 @@ serve(async (req) => {
             service_name: serviceResult.service_name,
             service_source: serviceResult.method,
             service_locked: false,
+            service_resolution_attempts: 0,
           }, updatedContext.context_version);
           emitFlowEvent('FLOW_SERVICE_RESOLVED', updatedContext, {
             source: 'service_resolution',
@@ -1751,6 +1763,21 @@ serve(async (req) => {
             proposed_state: decision.proposed_state,
             confidence: decision.confidence,
             reason: decision.reason,
+          });
+        } else if (hasSoftServiceSignal(extraction)) {
+          // Explicit-unknown: user named a service we don't offer (e.g.
+          // "ortodontia" when only Consulta Geral / Tratamento Cárie /
+          // Destartarização are active). The resolver returned null because
+          // we asked it to skip the generic fallback. Bump the attempts
+          // counter so the ASK_SERVICE branch below renders the active
+          // services list immediately instead of asking again generically.
+          const currentAttempts = updatedContext.service_resolution_attempts ?? 0;
+          updatedContext = await updateContext(conversationId, {
+            service_resolution_attempts: Math.max(currentAttempts, 2),
+          }, updatedContext.context_version);
+          logFlow('[FLOW_SERVICE_EXPLICIT_UNKNOWN]', {
+            conversation_id: conversationId,
+            service_keywords: Array.isArray(extraction.service_keywords) ? extraction.service_keywords : [],
           });
         }
       }
@@ -2744,39 +2771,72 @@ serve(async (req) => {
     ) {
 
       if (decision.action === 'ASK_SERVICE') {
+        // Increment loop guard. Reset to 0 when a service is set (see all
+        // service-resolved branches above).
+        const previousAttempts = updatedContext.service_resolution_attempts ?? 0;
+        const nextAttempts = previousAttempts + 1;
+
         logFlow('[FLOW_BRANCH]', {
           conversation_id: conversationId,
           branch: 'ASK_SERVICE',
           source: 'decision',
           state: updatedContext.state ?? null,
+          service_resolution_attempts: nextAttempts,
         });
 
         updatedContext = await updateContext(conversationId, {
           state: 'collecting_service',
+          service_resolution_attempts: nextAttempts,
         }, updatedContext.context_version);
 
-        const directive = buildResponseDirective({
-          state: updatedContext.state,
-          mustSayBlocks: [{
-            type: 'ask_service',
-            content: updatedContext.customer_name
-              ? `O utilizador já forneceu dados pessoais. Agradece brevemente e pergunta qual o serviço ou motivo da consulta, sem voltar a pedir dados pessoais.`
-              : 'Identifica o serviço pretendido de forma empática e sem pedir dados pessoais ainda.',
-            priority: 1,
-          }],
-          confirmedData: buildConfirmedSnapshot(updatedContext),
-          emotionalContext: emotionalContext as any,
-          language: 'pt-PT',
-        });
+        // Loop guard / explicit-unknown handling: from the 2nd ASK_SERVICE
+        // onwards (or whenever an explicit-unknown lookup pre-bumped the
+        // counter), surface a deterministic numbered list of the company's
+        // ACTIVE services. This avoids the LLM mentioning unavailable
+        // services and breaks the "qual serviço?" loop.
+        const activeServices = await getServices();
+        if (nextAttempts >= 2 && activeServices.length > 0) {
+          const lines = activeServices.map((service, index) => `${index + 1}. ${service.name}`);
+          reply =
+            `Neste momento consigo ajudar com:\n` +
+            `${lines.join('\n')}\n\n` +
+            `Qual pretende marcar?`;
+          logFlow('[FLOW_SERVICE_LIST_RENDERED]', {
+            conversation_id: conversationId,
+            attempts: nextAttempts,
+            active_service_count: activeServices.length,
+            services: activeServices.map((s) => ({ id: s.id, name: s.name })),
+          });
+        } else {
+          // First attempt: friendly LLM-generated ask. We still pass the
+          // exact list of active services so the LLM cannot mention any
+          // service that the company does not offer.
+          const activeServiceNames = activeServices.map((s) => s.name).join(', ');
+          const askContent = updatedContext.customer_name
+            ? `O utilizador já forneceu dados pessoais. Agradece brevemente e pergunta qual dos seguintes serviços pretende: ${activeServiceNames}. NUNCA mencionares serviços fora desta lista.`
+            : `Pergunta de forma empática qual dos seguintes serviços pretende: ${activeServiceNames}. NUNCA mencionares serviços fora desta lista.`;
 
-        reply = await generateResponse(
-          userMessage,
-          updatedContext,
-          serializeDirectiveToPrompt(directive),
-          null,
-          agentCtx,
-          empresaId,
-        );
+          const directive = buildResponseDirective({
+            state: updatedContext.state,
+            mustSayBlocks: [{
+              type: 'ask_service',
+              content: askContent,
+              priority: 1,
+            }],
+            confirmedData: buildConfirmedSnapshot(updatedContext),
+            emotionalContext: emotionalContext as any,
+            language: 'pt-PT',
+          });
+
+          reply = await generateResponse(
+            userMessage,
+            updatedContext,
+            serializeDirectiveToPrompt(directive),
+            null,
+            agentCtx,
+            empresaId,
+          );
+        }
 
       } else if (decision.action === 'ASK_DATE') {
         logFlow('[FLOW_BRANCH]', {
