@@ -4,6 +4,7 @@ import { checkAvailability } from './availability-engine.ts';
 import { guardReschedule } from './guardrails.ts';
 import { consumeCredits } from './credit-manager.ts';
 import { logAction } from './logger.ts';
+import { sendBookingConfirmationEmail } from './booking-email.ts';
 
 export async function executeReschedule(
   context: ConversationContext,
@@ -129,6 +130,18 @@ export async function executeReschedule(
     }));
     return { success: false, agendamento_id: null, error: 'Erro ao remarcar.', error_code: 'DB_ERROR' };
   }
+
+  const rescheduleEventAt = new Date().toISOString();
+  await sendBookingConfirmationEmail({
+    db,
+    context,
+    empresaId,
+    bookingId: appointmentId,
+    eventCutoffAt: rescheduleEventAt,
+    dataAgendamento: dataStr,
+    horaAgendamento: horaStr,
+    conversationId,
+  });
 
   await consumeCredits(empresaId, 'booking_reschedule', appointmentId);
 
