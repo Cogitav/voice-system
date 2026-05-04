@@ -19,6 +19,7 @@ function redactBookingInsertPayload(payload: Record<string, unknown>): Record<st
   return {
     ...payload,
     cliente_nome: payload.cliente_nome ? '[REDACTED]' : null,
+    cliente_email: payload.cliente_email ? '[REDACTED]' : null,
     cliente_telefone: payload.cliente_telefone ? '[REDACTED]' : null,
     notas: payload.notas ? '[REDACTED]' : null,
   };
@@ -348,6 +349,7 @@ export async function executeBooking(
     estado: 'confirmado',
     scheduling_state: 'confirmed',
     cliente_nome: context.customer_name,
+    cliente_email: context.customer_email ?? null,
     cliente_telefone: context.customer_phone ?? null,
     notas: context.customer_reason ?? null,
     execution_id: executionId,

@@ -17,7 +17,64 @@ type ReminderRunResult = {
   sent?: number;
   skipped?: number;
   failed?: number;
+  dry_run?: boolean;
+  results?: ReminderRunItem[];
 };
+
+type ReminderRunItem = {
+  agendamento_id?: string;
+  empresa_id?: string;
+  outcome?: 'sent' | 'skipped' | 'failed' | string;
+  reason?: string;
+  detail?: string;
+};
+
+const REMINDER_REASON_LABELS: Record<string, string> = {
+  already_sent: 'email ja enviado',
+  dry_run: 'simulacao',
+  flag_update_failed: 'enviado, mas estado nao atualizado',
+  log_failed: 'falha ao registar email',
+  missing_template: 'sem template ativo de lembrete/confirmacao',
+  missing_customer_email: 'sem email do cliente',
+  no_template: 'sem template ativo de lembrete/confirmacao',
+  outside_window: 'fora da janela de lembrete',
+  reminder_disabled: 'lembretes desativados',
+  send_failed: 'falha no envio',
+  template_lookup_failed: 'erro ao procurar template',
+  unexpected_error: 'erro inesperado',
+};
+
+function getReminderReasonLabel(reason: string | undefined): string {
+  if (!reason) return 'sem motivo indicado';
+  return REMINDER_REASON_LABELS[reason] ?? reason;
+}
+
+function formatResultRef(item: ReminderRunItem): string {
+  return item.agendamento_id ? `#${item.agendamento_id.slice(0, 8)}` : 'sem id';
+}
+
+function summarizeReminderIssues(results: ReminderRunItem[] | undefined): string | undefined {
+  if (!Array.isArray(results) || results.length === 0) return undefined;
+
+  const grouped = results
+    .filter((item) => item.outcome === 'skipped' || item.outcome === 'failed')
+    .reduce<Record<string, ReminderRunItem[]>>((acc, item) => {
+      const label = getReminderReasonLabel(item.reason);
+      acc[label] = [...(acc[label] ?? []), item];
+      return acc;
+    }, {});
+
+  const entries = Object.entries(grouped);
+  if (entries.length === 0) return undefined;
+
+  return entries
+    .map(([reason, items]) => {
+      const refs = items.slice(0, 3).map(formatResultRef).join(', ');
+      const suffix = items.length > 3 ? `, +${items.length - 3}` : '';
+      return `${reason}: ${items.length} (${refs}${suffix})`;
+    })
+    .join(' | ');
+}
 
 export default function AgendamentosPage() {
   const { isAdmin } = useAuth();
@@ -52,8 +109,15 @@ export default function AgendamentosPage() {
         throw error;
       }
 
+      console.log('[BOOKING_REMINDERS_MANUAL_RESPONSE]', data);
+      if (Array.isArray(data?.results) && data.results.length > 0) {
+        console.table(data.results);
+      }
+
+      const issueSummary = summarizeReminderIssues(data?.results);
       toast.success(
-        `Lembretes executados: processados ${data?.processed ?? 0}, enviados ${data?.sent ?? 0}, ignorados ${data?.skipped ?? 0}, falhados ${data?.failed ?? 0}.`
+        `Lembretes executados: processados ${data?.processed ?? 0}, enviados ${data?.sent ?? 0}, ignorados ${data?.skipped ?? 0}, falhados ${data?.failed ?? 0}.`,
+        issueSummary ? { description: issueSummary } : undefined
       );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erro ao executar lembretes.');
