@@ -1,17 +1,30 @@
 import { useState } from 'react';
-import { Calendar, Info } from 'lucide-react';
+import { BellRing, Calendar, Info, Loader2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { AgendamentosTable } from '@/components/agendamentos/AgendamentosTable';
 import { AgendamentoFormDialog } from '@/components/agendamentos/AgendamentoFormDialog';
 import { AgendamentosFilters } from '@/components/agendamentos/AgendamentosFilters';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
 import { useAgendamentos, Agendamento, AgendamentoFilters } from '@/hooks/useAgendamentos';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+
+type ReminderRunResult = {
+  processed?: number;
+  sent?: number;
+  skipped?: number;
+  failed?: number;
+};
 
 export default function AgendamentosPage() {
+  const { isAdmin } = useAuth();
   const [filters, setFilters] = useState<AgendamentoFilters>({});
   const [editingAgendamento, setEditingAgendamento] = useState<Agendamento | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isRunningReminders, setIsRunningReminders] = useState(false);
 
   const { data: agendamentos = [], isLoading } = useAgendamentos(filters);
 
@@ -24,6 +37,28 @@ export default function AgendamentosPage() {
     setIsEditDialogOpen(open);
     if (!open) {
       setEditingAgendamento(null);
+    }
+  };
+
+  const handleRunReminders = async () => {
+    setIsRunningReminders(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke<ReminderRunResult>('send-booking-reminders', {
+        body: { dry_run: false },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success(
+        `Lembretes executados: processados ${data?.processed ?? 0}, enviados ${data?.sent ?? 0}, ignorados ${data?.skipped ?? 0}, falhados ${data?.failed ?? 0}.`
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao executar lembretes.');
+    } finally {
+      setIsRunningReminders(false);
     }
   };
 
@@ -41,7 +76,24 @@ export default function AgendamentosPage() {
               Gestão de agendamentos de todas as empresas
             </p>
           </div>
-          <AgendamentoFormDialog />
+          <div className="flex items-center gap-2">
+            {isAdmin && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleRunReminders}
+                disabled={isRunningReminders}
+              >
+                {isRunningReminders ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <BellRing className="mr-2 h-4 w-4" />
+                )}
+                Executar lembretes agora
+              </Button>
+            )}
+            <AgendamentoFormDialog />
+          </div>
         </div>
 
         <Alert>
