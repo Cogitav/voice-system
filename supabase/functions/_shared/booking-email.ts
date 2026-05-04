@@ -62,6 +62,21 @@ async function sendEmail(
   }
 }
 
+export type BookingEmailOutcome =
+  | { sent: true; emailLogId: string; providerEmailId: string | null }
+  | {
+      sent: false;
+      reason:
+        | 'missing_customer_email'
+        | 'template_lookup_failed'
+        | 'no_template'
+        | 'already_sent'
+        | 'send_failed'
+        | 'log_failed'
+        | 'unexpected_error';
+      detail?: string;
+    };
+
 export async function sendBookingConfirmationEmail(params: {
   db: ReturnType<typeof getServiceClient>;
   context: ConversationContext;
@@ -71,7 +86,7 @@ export async function sendBookingConfirmationEmail(params: {
   dataAgendamento: string;
   horaAgendamento: string;
   conversationId: string;
-}): Promise<void> {
+}): Promise<BookingEmailOutcome> {
   const {
     db,
     context,
@@ -91,7 +106,7 @@ export async function sendBookingConfirmationEmail(params: {
         booking_id: bookingId,
         conversation_id: conversationId,
       });
-      return;
+      return { sent: false, reason: 'missing_customer_email' };
     }
 
     const { data: templates, error: templateError } = await db
@@ -110,7 +125,7 @@ export async function sendBookingConfirmationEmail(params: {
         conversation_id: conversationId,
         error: templateError.message,
       });
-      return;
+      return { sent: false, reason: 'template_lookup_failed', detail: templateError.message };
     }
 
     const template = (templates?.[0] ?? null) as EmailTemplate | null;
@@ -120,7 +135,7 @@ export async function sendBookingConfirmationEmail(params: {
         booking_id: bookingId,
         conversation_id: conversationId,
       });
-      return;
+      return { sent: false, reason: 'no_template' };
     }
 
     const { data: existingLogs } = await db
@@ -140,7 +155,7 @@ export async function sendBookingConfirmationEmail(params: {
         email_log_id: existingLogs[0].id,
         conversation_id: conversationId,
       });
-      return;
+      return { sent: false, reason: 'already_sent' };
     }
 
     const { data: empresa } = await db
@@ -191,7 +206,7 @@ export async function sendBookingConfirmationEmail(params: {
         status: 'failed',
         error_message: emailResult.error ?? 'Failed to send email',
       });
-      return;
+      return { sent: false, reason: 'send_failed', detail: emailResult.error ?? undefined };
     }
 
     const { data: emailLog, error: emailLogError } = await db
@@ -215,7 +230,7 @@ export async function sendBookingConfirmationEmail(params: {
         conversation_id: conversationId,
         error: emailLogError?.message ?? 'Missing email_log id',
       });
-      return;
+      return { sent: false, reason: 'log_failed', detail: emailLogError?.message ?? undefined };
     }
 
     await consumeCredits(empresaId, 'email_send', emailLog.id);
@@ -225,11 +240,14 @@ export async function sendBookingConfirmationEmail(params: {
       email_log_id: emailLog.id,
       provider_email_id: emailResult.id ?? null,
     });
+    return { sent: true, emailLogId: emailLog.id, providerEmailId: emailResult.id ?? null };
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
     console.warn('[BOOKING_CONFIRMATION_EMAIL_ERROR]', {
       booking_id: bookingId,
       conversation_id: conversationId,
-      error: error instanceof Error ? error.message : String(error),
+      error: detail,
     });
+    return { sent: false, reason: 'unexpected_error', detail };
   }
 }

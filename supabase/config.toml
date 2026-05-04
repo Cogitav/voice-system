@@ -49,3 +49,8 @@ verify_jwt = false
 [functions.booking-v2]
 # Deferred Phase 2 endpoint; require JWT until promoted to public API.
 verify_jwt = true
+
+[functions.send-booking-reminders]
+# Manual-trigger admin function. Auth is enforced explicitly inside the
+# handler via get_current_user_role RPC (mirrors create-user/manage-ai-provider).
+verify_jwt = true
