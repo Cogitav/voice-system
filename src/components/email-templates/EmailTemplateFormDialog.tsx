@@ -130,7 +130,7 @@ export function EmailTemplateFormDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="empresa_id">Empresa *</Label>
               <Select
@@ -256,7 +256,7 @@ export function EmailTemplateFormDialog({
             <Label htmlFor="is_active">Template ativo</Label>
           </div>
 
-          <div className="flex justify-end gap-2 pt-4">
+          <div className="flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-end">
             <Button
               type="button"
               variant="outline"

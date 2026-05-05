@@ -130,7 +130,7 @@ export default function AgendamentosPage() {
     <DashboardLayout>
       <PageContainer>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
               <Calendar className="w-6 h-6" />
@@ -140,7 +140,7 @@ export default function AgendamentosPage() {
               Gestão de agendamentos de todas as empresas
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             {isAdmin && (
               <Button
                 type="button"

@@ -65,7 +65,7 @@ export default function EmailTemplatesPage() {
       <PageLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
               <Mail className="h-6 w-6 text-primary" />
@@ -78,16 +78,16 @@ export default function EmailTemplatesPage() {
               </p>
             </div>
           </div>
-          <Button onClick={() => setDialogOpen(true)}>
+          <Button className="w-full sm:w-auto" onClick={() => setDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Novo Template
           </Button>
         </div>
 
         {/* Filters */}
-        <div className="flex gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row">
           <Select value={empresaFilter} onValueChange={setEmpresaFilter}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-full sm:w-[200px]">
               <SelectValue placeholder="Filtrar por empresa" />
             </SelectTrigger>
             <SelectContent>
