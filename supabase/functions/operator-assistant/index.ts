@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { callLLM } from "../_shared/llm-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,10 +15,61 @@ interface Message {
 }
 
 interface AssistantResponse {
+  success?: boolean;
+  message?: string;
   summary: string;
   detectedIntent: string;
   suggestedReplies: string[];
   nextActions: string[];
+}
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function fallbackAssistantResponse(message: string): AssistantResponse {
+  return {
+    success: false,
+    message,
+    summary: "Sugestoes automaticas temporariamente indisponiveis.",
+    detectedIntent: "Indefinido",
+    suggestedReplies: [
+      "Ola! Estou a acompanhar o seu pedido. Pode dar-me mais alguns detalhes?",
+      "Obrigado pela informacao. Vou verificar internamente e ja lhe dou uma resposta.",
+      "Percebo. Posso ajudar com mais alguma coisa relacionada com este pedido?",
+    ],
+    nextActions: [
+      "Continuar atendimento manual",
+      "Pedir mais contexto",
+      "Devolver a IA quando apropriado",
+    ],
+  };
+}
+
+function normalizeAssistantData(value: unknown): AssistantResponse {
+  const data = value as Partial<AssistantResponse> | null;
+  const fallback = fallbackAssistantResponse("Sugestoes indisponiveis.");
+  const suggestedReplies = Array.isArray(data?.suggestedReplies)
+    ? data.suggestedReplies.filter((item): item is string => typeof item === "string").slice(0, 3)
+    : [];
+  const nextActions = Array.isArray(data?.nextActions)
+    ? data.nextActions.filter((item): item is string => typeof item === "string").slice(0, 3)
+    : [];
+
+  return {
+    success: true,
+    summary: typeof data?.summary === "string" && data.summary.trim()
+      ? data.summary
+      : "Resumo indisponivel.",
+    detectedIntent: typeof data?.detectedIntent === "string" && data.detectedIntent.trim()
+      ? data.detectedIntent
+      : "Indefinido",
+    suggestedReplies: suggestedReplies.length > 0 ? suggestedReplies : fallback.suggestedReplies,
+    nextActions: nextActions.length > 0 ? nextActions : fallback.nextActions,
+  };
 }
 
 serve(async (req) => {
@@ -28,29 +80,32 @@ serve(async (req) => {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing authorization header" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(fallbackAssistantResponse("Sessao invalida. Volte a iniciar sessao."));
     }
 
-    const { conversationId } = await req.json();
+    let body: { conversationId?: string } = {};
+    try {
+      body = await req.json();
+    } catch {
+      return jsonResponse(fallbackAssistantResponse("Pedido invalido."));
+    }
 
+    const conversationId = body.conversationId;
     if (!conversationId) {
-      return new Response(JSON.stringify({ error: "Missing conversationId" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(fallbackAssistantResponse("Conversa nao indicada."));
     }
 
-    // Create Supabase client with user's auth
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY");
+    if (!supabaseUrl || !supabaseKey) {
+      console.error("Operator assistant missing Supabase environment variables");
+      return jsonResponse(fallbackAssistantResponse("Configuracao Supabase indisponivel."));
+    }
+
     const supabase = createClient(supabaseUrl, supabaseKey, {
       global: { headers: { Authorization: authHeader } },
     });
 
-    // Fetch conversation details
     const { data: conversation, error: convError } = await supabase
       .from("conversations")
       .select("*, empresas(nome)")
@@ -59,21 +114,15 @@ serve(async (req) => {
 
     if (convError || !conversation) {
       console.error("Error fetching conversation:", convError);
-      return new Response(JSON.stringify({ error: "Conversation not found" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(fallbackAssistantResponse("Conversa nao encontrada ou sem acesso."));
     }
 
-    // Only allow if human_active
     if (conversation.status !== "human_active") {
-      return new Response(JSON.stringify({ error: "Assistant only available when human is active" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(
+        fallbackAssistantResponse("O assistente interno so fica disponivel quando o atendimento humano esta ativo."),
+      );
     }
 
-    // Fetch messages
     const { data: messages, error: msgError } = await supabase
       .from("messages")
       .select("*")
@@ -82,15 +131,11 @@ serve(async (req) => {
 
     if (msgError) {
       console.error("Error fetching messages:", msgError);
-      return new Response(JSON.stringify({ error: "Failed to fetch messages" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(fallbackAssistantResponse("Nao foi possivel carregar as mensagens da conversa."));
     }
 
-    // Format conversation for AI
     const conversationHistory = (messages || [])
-      .filter((m: Message) => !m.is_internal) // Only include client-visible messages
+      .filter((m: Message) => !m.is_internal)
       .map((m: Message) => {
         const sender = m.sender_type === "client" ? "Cliente" : m.sender_type === "ai" ? "IA" : "Operador";
         return `[${sender}]: ${m.content}`;
@@ -100,130 +145,75 @@ serve(async (req) => {
     const clientName = conversation.client_name || conversation.client_identifier || "Cliente";
     const companyName = conversation.empresas?.nome || "Empresa";
 
-    const systemPrompt = `Você é um assistente interno para operadores humanos de atendimento ao cliente.
-Sua função é ajudar o operador a responder melhor e mais rápido ao cliente.
+    const systemPrompt = `Es um assistente interno para operadores humanos de atendimento ao cliente.
+A tua funcao e ajudar o operador a responder melhor e mais rapidamente ao cliente.
 
 REGRAS IMPORTANTES:
-- Você NUNCA fala diretamente com o cliente
-- Suas sugestões são apenas para o operador ver
-- Seja conciso e prático
-- Foque em ajudar o operador a resolver o problema do cliente
+- Nunca falas diretamente com o cliente.
+- As sugestoes sao apenas para o operador.
+- Se conciso, pratico e profissional.
+- Foca-te em ajudar o operador a resolver o problema do cliente.
 
 CONTEXTO:
 - Empresa: ${companyName}
 - Cliente: ${clientName}
 - Canal: ${conversation.channel}
 
-HISTÓRICO DA CONVERSA:
+HISTORICO DA CONVERSA:
 ${conversationHistory || "Nenhuma mensagem ainda."}
 
-Com base neste contexto, forneça:
-1. Um resumo conciso da conversa (máximo 2 frases)
-2. A intenção detectada do cliente (uma palavra ou frase curta)
-3. Exatamente 3 sugestões de resposta que o operador pode usar (curtas, diretas, profissionais)
-4. 2-3 próximas ações sugeridas (ex: "Propor agendamento", "Enviar link de pagamento", "Devolver à IA")
+Com base neste contexto, fornece:
+1. Um resumo conciso da conversa, maximo 2 frases.
+2. A intencao detectada do cliente, numa palavra ou frase curta.
+3. Exatamente 3 sugestoes de resposta que o operador pode usar.
+4. 2-3 proximas acoes sugeridas.
 
-Responda APENAS em formato JSON válido seguindo esta estrutura exata:
+Responde APENAS em JSON valido com esta estrutura:
 {
   "summary": "string",
-  "detectedIntent": "string", 
+  "detectedIntent": "string",
   "suggestedReplies": ["string", "string", "string"],
   "nextActions": ["string", "string"]
 }`;
 
-    // Call Lovable AI
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "LOVABLE_API_KEY not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!conversation.empresa_id) {
+      return jsonResponse(fallbackAssistantResponse("Conversa sem empresa associada."));
     }
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: "Analise a conversa e forneça as sugestões para o operador." },
-        ],
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error("AI Gateway error:", aiResponse.status, errorText);
-      
-      if (aiResponse.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Try again later." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (aiResponse.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      
-      return new Response(JSON.stringify({ error: "AI service error" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    let content = "";
+    try {
+      const llmResponse = await callLLM({
+        system_prompt: systemPrompt,
+        user_message: "Analisa a conversa e fornece sugestoes para o operador.",
+        response_format: "json",
+        temperature: 0.2,
+        max_tokens: 700,
+      }, conversation.empresa_id);
+      content = llmResponse.content;
+    } catch (llmError) {
+      console.error("Operator assistant LLM unavailable:", llmError);
+      return jsonResponse(fallbackAssistantResponse("Fornecedor de IA indisponivel ou nao configurado."));
     }
-
-    const aiData = await aiResponse.json();
-    const content = aiData.choices?.[0]?.message?.content;
 
     if (!content) {
-      return new Response(JSON.stringify({ error: "Empty AI response" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(fallbackAssistantResponse("O fornecedor de IA devolveu uma resposta vazia."));
     }
 
-    // Parse JSON from AI response
-    let assistantData: AssistantResponse;
     try {
-      // Try to extract JSON from the response
       const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        assistantData = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("No JSON found in response");
-      }
+      if (!jsonMatch) throw new Error("No JSON found in response");
+
+      const assistantData = normalizeAssistantData(JSON.parse(jsonMatch[0]));
+      console.log("Operator assistant generated suggestions for conversation:", conversationId);
+      return jsonResponse(assistantData);
     } catch (parseError) {
-      console.error("Failed to parse AI response:", content);
-      // Provide fallback response
-      assistantData = {
-        summary: "Não foi possível analisar a conversa automaticamente.",
-        detectedIntent: "Indefinido",
-        suggestedReplies: [
-          "Olá! Como posso ajudá-lo hoje?",
-          "Entendo. Deixe-me verificar isso para si.",
-          "Há mais alguma coisa em que posso ajudar?",
-        ],
-        nextActions: ["Continuar atendimento", "Devolver à IA"],
-      };
+      console.error("Failed to parse AI response:", content, parseError);
+      return jsonResponse(fallbackAssistantResponse("Nao foi possivel interpretar a resposta da IA."));
     }
-
-    console.log("Operator assistant generated suggestions for conversation:", conversationId);
-
-    return new Response(JSON.stringify(assistantData), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-
   } catch (error) {
     console.error("Operator assistant error:", error);
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse(
+      fallbackAssistantResponse(error instanceof Error ? error.message : "Erro inesperado no assistente interno."),
+    );
   }
 });
